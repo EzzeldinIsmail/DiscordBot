@@ -433,10 +433,11 @@ with connect('main.db') as db:
                     await bot.say('Your character has started adventuring on quest {} for {}h and {}mins, {} exp and {}G, wish them luck!'
                                   .format(name, (tim//60), (tim % 60), exp, gold))
 
-    @bot.command()
-    async def collect():
+    @bot.command(pass_context=True)
+    async def collect(ctx):
+        userid = ctx.message.author.id
         """Finishes logged quest"""
-        cursor.execute('SELECT time, duration, exp, gold, name, failure FROM logs WHERE ID = (?)', (userid,))
+        cursor.execute('SELECT time, duration, exp, gold, name, failure FROM logs WHERE ID = ?', (userid,))
         lines = cursor.fetchall()
         if lines == []:  # Checks if there are currenlty any pending quests
             await bot.say('You do not currently have a pending request.')
@@ -449,8 +450,6 @@ with connect('main.db') as db:
                 await bot.say('Your quest is not done yet there is still {} mins and {} seconds.'
                               .format(int(until / 60), int(until % 60)))
             elif not choices([False, True], weights=[failure, 100]):
-                cursor.execute('DELETE FROM logs WHERE ID = {}'.format(userid))  # Deletes quest from logs
-                db.commit()
                 await bot.say('You have failed this quest. Good luck next time!')
             else:
                 cursor.execute('SELECT exp, gold, level, achievements, reputation FROM characters WHERE ID = {}'.format(userid))
@@ -474,10 +473,11 @@ with connect('main.db') as db:
                         achievements += ', {}'.format(achievement)
                 cursor.execute('UPDATE characters SET exp=?, gold=?, level =?, achievements=?, reputation=? WHERE ID = ?', (exp, gold, level, achievements,
                                                                                                                             urep, userid))
-                # Updates character stats
-                cursor.execute('DELETE FROM logs WHERE ID = {}'.format(userid))  # Deletes quest from logs
                 db.commit()
+                # Updates character stats
                 await bot.say('"{}" quest collected.'.format(name))
+            cursor.execute('DELETE FROM logs WHERE ID = {}'.format(userid))  # Deletes quest from logs
+            db.commit()
 
     @bot.command()
     async def shop():
