@@ -449,7 +449,7 @@ with connect('main.db') as db:
                 until = (end - time.time())
                 await bot.say('Your quest is not done yet there is still {} mins and {} seconds.'
                               .format(int(until / 60), int(until % 60)))
-            elif not choices([False, True], weights=[failure, 100]):
+            elif not choices([False, True], cum_weights=[failure, 100]):
                 await bot.say('You have failed this quest. Good luck next time!')
             else:
                 cursor.execute('SELECT exp, gold, level, achievements, reputation FROM characters WHERE ID = {}'.format(userid))
