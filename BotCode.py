@@ -578,6 +578,7 @@ with connect('main.db') as db:
 
         await bot.say(embed=embed)
 
+
     @bot.command()
     async def role(person, *args):
         person = person.capitalize()
