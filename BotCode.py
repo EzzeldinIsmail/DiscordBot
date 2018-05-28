@@ -170,7 +170,7 @@ async def die():
     await bot.say('<@{}> have killed themself! :upside_down::gun:'.format(userid))
 
 
-@bot.command()
+@bot.command(aliases=['bott'])
 async def bots(*args):
     n = int(args[-1])
     for _ in range(n):
@@ -189,18 +189,29 @@ async def purge(ctx):
     await bot.purge_from(ctx.message.channel, check= lambda x: True, limit=n)
 
 
-@bot.command()
+@bot.command(aliases=['exit'])
 async def shutdown():
     await bot.change_presence(status=discord.Status.offline)
     await asyncio.sleep(10)
     exit(5)
+
+@bot.command(pass_context=True)
+async def ping(ctx):
+    message = ' '.join(ctx.message.content.split(' ')[1:])
+    server = ctx.message.server
+    for channel in server.channels:
+        if channel.name == 'pings':
+            await bot.send_message(channel, message)
+            break
+    else:
+        await bot.say('I did not find a pings channel to send the message to.')
 
 
 with connect('main.db') as db:
     """Everything below here has to do with the mmorpg"""
     cursor = db.cursor()
 
-    @bot.command(pass_context=True)
+    @bot.command(pass_context=True, aliases=['char'])
     async def character(ctx):
         """Checks if the user has a character and creates one if they don't"""
         user = ctx.message.author.name
@@ -293,7 +304,7 @@ with connect('main.db') as db:
 
             await bot.say(embed=embed)
 
-    @bot.command(pass_context=True)
+    @bot.command(pass_context=True, aliases=['character_make', 'make_character'])
     async def create(ctx):
         """Creates a character if the user doesn't already have one"""
         try:
@@ -325,7 +336,7 @@ with connect('main.db') as db:
             await bot.say('You already have a character.')
 
 
-    @bot.command()
+    @bot.command(aliases=['inv', 'bag'])
     async def inventory():
         word = check(cursor, 'characters', 'ID', userid)
         if word == []:  # Checks if the user has a character
@@ -387,7 +398,7 @@ with connect('main.db') as db:
 
             await bot.say(embed=embed)
 
-    @bot.command()
+    @bot.command(aliases=['log_quest'])
     async def start(*args):
         """Starts quest for user"""
         name = ' '.join(args).capitalize().replace("'", "\'")
@@ -434,6 +445,20 @@ with connect('main.db') as db:
                                   .format(name, (tim//60), (tim % 60), exp, gold))
 
     @bot.command(pass_context=True)
+    async def abandon(ctx):
+        id = ctx.message.author.id
+        if check(cursor, 'characters', 'ID', id) == []:
+            await bot.say('You do not have a character.')
+        elif check(cursor, 'logs', 'ID', id) == []:
+            await bot.say('You currently have no pending quests to give up.')
+
+        else:
+            name = cursor.execute('SELECT name FROM logs WHERE ID = ?', (id,)).fetchall()[0][0]
+            cursor.execute('DELETE FROM logs WHERE ID = ?', (id,))
+            db.commit()
+            await bot.say('{} quest abandoned'.format(name))
+
+    @bot.command(pass_context=True, aliases=['collect_quest'])
     async def collect(ctx):
         userid = ctx.message.author.id
         """Finishes logged quest"""
@@ -449,7 +474,7 @@ with connect('main.db') as db:
                 until = (end - time.time())
                 await bot.say('Your quest is not done yet there is still {} mins and {} seconds.'
                               .format(int(until / 60), int(until % 60)))
-            elif not choices([False, True], cum_weights=[failure, 100]):
+            elif not choices([False, True], weights=[failure, (100-failure)])[0]:
                 await bot.say('You have failed this quest. Good luck next time!')
             else:
                 cursor.execute('SELECT exp, gold, level, achievements, reputation FROM characters WHERE ID = {}'.format(userid))
@@ -476,8 +501,8 @@ with connect('main.db') as db:
                 db.commit()
                 # Updates character stats
                 await bot.say('"{}" quest collected.'.format(name))
-            cursor.execute('DELETE FROM logs WHERE ID = {}'.format(userid))  # Deletes quest from logs
-            db.commit()
+                cursor.execute('DELETE FROM logs WHERE ID = {}'.format(userid))  # Deletes quest from logs
+                db.commit()
 
     @bot.command()
     async def shop():
