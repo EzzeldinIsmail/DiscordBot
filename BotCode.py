@@ -8,8 +8,9 @@ from sys import exc_info
 from sqlite3 import *
 from typing import Union
 # TODO document discord api
-# TODO risk of failure for special quests, and items to alter
 # TODO quests done, quests failed
+# TODO gambling
+# TODO gold --> xp converter
 
 userid = ''
 msg: discord.Message = ''
@@ -19,6 +20,8 @@ client = discord.Client()
 bot: asyncio = Bot(command_prefix=prefix)
 discord.Message: asyncio
 
+def limit(lvl):
+    return int(1000*1.5**(lvl-1))
 
 def check(cursor, db: str, field: str, req: Union[str, int]):
     """Used to check if req exists in the database"""
@@ -215,6 +218,7 @@ with connect('main.db') as db:
     async def character(ctx):
         """Checks if the user has a character and creates one if they don't"""
         user = ctx.message.author.name
+        image = ctx.message.author.avatar_url
         word = check(cursor, 'characters', 'ID', userid)
         if word == []:  # Checks if the user has a character
             await bot.say('You do not have a character made please make a character by using the command make_character {name} {class}.')
@@ -241,14 +245,14 @@ with connect('main.db') as db:
             )
             embed.set_footer(text='At {}'.format(datetime.datetime.utcnow().strftime('%H:%M:%S, %d %a %b %y')))
             if role == 'None':
-                embed.set_author(name='{}'.format(user))
+                embed.set_author(name='{}'.format(user), icon_url=image)
             else:
-                embed.set_author(name='{} <{}>'.format(user, role))
+                embed.set_author(name='{} <{}>'.format(user, role), icon_url=image)
             embed.add_field(name='Name', value=name)
             for i in achievements.split(', '):
                 embed.add_field(name='Achievement', value=i)
             embed.add_field(name='Class', value=classs)
-            embed.add_field(name='Exp', value='{}/{}'.format(exp, int(1000 * 1.2 ** (level+1))))
+            embed.add_field(name='Exp', value='{}/{}'.format(exp, limit(level)))
             embed.add_field(name='Gold', value="{}G".format(gold))
             embed.add_field(name='Level', value=level)
             embed.add_field(name='Reputation', value=reputation)
@@ -296,7 +300,7 @@ with connect('main.db') as db:
             for i in achievements.split(', '):
                 embed.add_field(name='Achievement', value=i)
             embed.add_field(name='Class', value=classs)
-            embed.add_field(name='Exp', value='{}/{}'.format(exp, int(1000 * 1.2 ** (level+1))))
+            embed.add_field(name='Exp', value='{}/{}'.format(exp, limit(level)))
             embed.add_field(name='Gold', value="{}G".format(gold))
             embed.add_field(name='Level', value=level)
             embed.add_field(name='Reputation', value=reputation)
@@ -360,7 +364,7 @@ with connect('main.db') as db:
         if n is None:
             await bot.say('You need to give in the level of quests thats you want to retrieve eg:\n ```quests 1```')
         else:
-            cursor.execute('SELECT name FROM quests WHERE level = {} ORDER BY level, requirement, time, name, exp, gold, description'.format(n))
+            cursor.execute('SELECT name FROM quests WHERE level = {} GROUP BY requirement, name ORDER BY name, time '.format(n))
             lines = cursor.fetchall()
             s = 'Details: \nQuest names:\n'
             s += ('``Level {} quests``\n'.format(n))
@@ -428,7 +432,7 @@ with connect('main.db') as db:
                 elif ql > cl:  # Changes failure rate
                     failure += int((ql-cl) * 8.67)
                 elif cl > ql:
-                    failure -= int((cl-ql) * 10)
+                    failure -= int((cl-ql) * 5)
                 if failure > 100:
                     failure = 100
                 elif failure < 0:
@@ -475,6 +479,8 @@ with connect('main.db') as db:
                 await bot.say('Your quest is not done yet there is still {} mins and {} seconds.'
                               .format(int(until / 60), int(until % 60)))
             elif not choices([False, True], weights=[failure, (100-failure)])[0]:
+                cursor.execute('DELETE FROM logs WHERE ID = {}'.format(userid))  # Deletes quest from logs
+                db.commit()
                 await bot.say('You have failed this quest. Good luck next time!')
             else:
                 cursor.execute('SELECT exp, gold, level, achievements, reputation FROM characters WHERE ID = {}'.format(userid))
@@ -482,8 +488,8 @@ with connect('main.db') as db:
                 exp += uexp  # Updates values
                 gold += ugold
                 urep += qrep
-                if exp > int(1000 * 1.2 ** (level+1)):  # Checks if the user has leveled up
-                    exp = exp % int(1000 * 1.2 ** (level + 1))  # Calculates leftover xp
+                if exp > limit(level):  # Checks if the user has leveled up
+                    exp = exp % limit(level)  # Calculates leftover xp
                     level += 1
                     await bot.say('Congratulations you have reached level {}'.format(level))  # Prints level up message
 
@@ -574,7 +580,7 @@ with connect('main.db') as db:
             colour=discord.Colour.lighter_grey()
         )
         for name, level, exp in details:
-            embed.add_field(name=name, value="Level:{}, exp:{}/{}".format(level, exp, int(1000 * 1.2 ** level+1)), inline=False)
+            embed.add_field(name=name, value="Level:{}, exp:{}/{}".format(level, exp, limit(level)), inline=False)
 
         await bot.say(embed=embed)
 
@@ -591,6 +597,36 @@ with connect('main.db') as db:
         else:
             await bot.say('You do not have permission to give people roles.')
 
+    @bot.command(pass_context=True, aliases=['battle', 'attack'])
+    async def pvp(ctx):
+        message = ctx.message
+        user = ctx.message.author
+        if not  0 < len(message.mentions) < 2:
+            await bot.say('Wrong amount of mentions.')
+            return
+        else:
+            mention = message.mentions[0]
+            uc, un, ul, ue = cursor.execute('SELECT class, name, level, extra FROM characters WHERE ID = ?', (user.id,)).fetchall()[0]
+            mc, mn, ml, me = cursor.execute('SELECT class, name, level, extra FROM characters WHERE ID = ?', (mention.id,)).fetchall()[0]
+            ue = len(ue.split(', '))
+            me = len(me.split(', '))
+            #1.04
+            ud = {'Name': un, 'Class': uc, 'Level':ul, 'Extra':ue}
+            md = {'Name': mn, 'Class': mc, 'Level':ml, 'Extra':me}
+            for i in [ud, md]:
+                if i['Class'] == 'Warrior':
+                    i['Armour'] = 0 * i['Level'] * i['Extra']
+                    i['Damage'] = 0 * i['Level'] * i['Extra']
+                    i['Dodge'] = 0 * i['Level'] * i['Extra']
+                elif i['Class'] == 'Wizard':
+                    i['Armour'] = 0 * i['Level'] * i['Extra']
+                    i['Damage'] = 0 * i['Level'] * i['Extra']
+                    i['Dodge'] = 0 * i['Level'] * i['Extra']
+                elif i['Class'] == 'Rogue':
+                    i['Armour'] = 0 * i['Level'] * i['Extra']
+                    i['Damage'] = 0 * i['Level'] * i['Extra']
+                    i['Dodge'] = 0 * i['Level'] * i['Extra']
 
+            await bot.say('{}\n{}'.format(ud, md))
 if __name__ == '__main__':
     bot.run('NDQ4OTA4NjYxNjQxNzA3NTUw.DedAYg.E7rKIVT8dn5ufjuDBHVtxIMTR5g')
