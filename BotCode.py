@@ -2,13 +2,12 @@ import discord
 from discord.ext.commands import Bot
 # import time
 # from re import search
-from random import choices
+from random import randint
 import asyncio
 from sys import exc_info
 from sqlite3 import *
 from typing import Union
 # TODO document discord api
-# TODO quests done, quests failed
 # TODO gambling
 # TODO gold --> xp converter
 
@@ -217,7 +216,7 @@ with connect('main.db') as db:
     @bot.command(pass_context=True, aliases=['char'])
     async def character(ctx):
         """Checks if the user has a character and creates one if they don't"""
-        user = ctx.message.author.name
+        user = ctx.message.author
         image = ctx.message.author.avatar_url
         word = check(cursor, 'characters', 'ID', userid)
         if word == []:  # Checks if the user has a character
@@ -245,9 +244,9 @@ with connect('main.db') as db:
             )
             embed.set_footer(text='At {}'.format(datetime.datetime.utcnow().strftime('%H:%M:%S, %d %a %b %y')))
             if role == 'None':
-                embed.set_author(name='{}'.format(user), icon_url=image)
+                embed.set_author(name='{}'.format(user.name), icon_url=image)
             else:
-                embed.set_author(name='{} <{}>'.format(user, role), icon_url=image)
+                embed.set_author(name='{} <{}>'.format(user.name, role), icon_url=image)
             embed.add_field(name='Name', value=name)
             for i in achievements.split(', '):
                 embed.add_field(name='Achievement', value=i)
@@ -260,7 +259,7 @@ with connect('main.db') as db:
 
             await bot.say(embed=embed)
 
-    @bot.command()
+    @bot.command(aliases=['ins'])
     async def inspect(*args):
         name = ' '.join(args).capitalize()
         l = check(cursor, 'characters', 'name', name)
@@ -312,7 +311,8 @@ with connect('main.db') as db:
     async def create(ctx):
         """Creates a character if the user doesn't already have one"""
         try:
-            name, classs = ctx.message.content.split(' ')[1:]
+            name = ctx.message.content.split(' ')[1:-1]
+            classs = ctx.message.content.split(' ')[-1]
         except IndexError:
             name = None
             classs = None
@@ -350,6 +350,7 @@ with connect('main.db') as db:
             embed = discord.Embed(  # Creates the character profile embed
                 title='Character inventory:',
                 colour=discord.Colour.orange(),
+                description='{} items'.format(len(extra.split(', ')))
             )
             embed.set_author(name=name)
             embed.set_footer(text='At {}'.format(datetime.datetime.utcnow().strftime('%H:%M:%S, %d %a %b %y')))
@@ -478,7 +479,7 @@ with connect('main.db') as db:
                 until = (end - time.time())
                 await bot.say('Your quest is not done yet there is still {} mins and {} seconds.'
                               .format(int(until / 60), int(until % 60)))
-            elif not choices([False, True], weights=[failure, (100-failure)])[0]:
+            elif randint(0, 100) < failure:
                 cursor.execute('DELETE FROM logs WHERE ID = {}'.format(userid))  # Deletes quest from logs
                 db.commit()
                 await bot.say('You have failed this quest. Good luck next time!')
@@ -603,30 +604,118 @@ with connect('main.db') as db:
         user = ctx.message.author
         if not  0 < len(message.mentions) < 2:
             await bot.say('Wrong amount of mentions.')
-            return
         else:
             mention = message.mentions[0]
             uc, un, ul, ue = cursor.execute('SELECT class, name, level, extra FROM characters WHERE ID = ?', (user.id,)).fetchall()[0]
             mc, mn, ml, me = cursor.execute('SELECT class, name, level, extra FROM characters WHERE ID = ?', (mention.id,)).fetchall()[0]
             ue = len(ue.split(', '))
             me = len(me.split(', '))
-            #1.04
             ud = {'Name': un, 'Class': uc, 'Level':ul, 'Extra':ue}
             md = {'Name': mn, 'Class': mc, 'Level':ml, 'Extra':me}
             for i in [ud, md]:
+                """ At lvl 20, 20 items
+                        Armour  Damage  Dodge
+                Warrior 3.63M   732K    26
+                Wizard  3.32M   831K    39
+                Rogue   3.02M   665K    53
+                """
                 if i['Class'] == 'Warrior':
-                    i['Armour'] = 0 * i['Level'] * i['Extra']
-                    i['Damage'] = 0 * i['Level'] * i['Extra']
-                    i['Dodge'] = 0 * i['Level'] * i['Extra']
+                    i['Armour'] = int(300 * (1.6**i['Level']))
+                    i['Damage'] = int((110 * i['Extra']) * (1.5**i['Level']))
+                    i['Dodge'] = int(10 * (1.05** i['Extra']))
                 elif i['Class'] == 'Wizard':
-                    i['Armour'] = 0 * i['Level'] * i['Extra']
-                    i['Damage'] = 0 * i['Level'] * i['Extra']
-                    i['Dodge'] = 0 * i['Level'] * i['Extra']
+                    i['Armour'] = int(275 * (1.6**i['Level']))
+                    i['Damage'] = int((125 * i['Extra']) * (1.5**i['Level']))
+                    i['Dodge'] = int(15 * (1.05** i['Extra']))
                 elif i['Class'] == 'Rogue':
-                    i['Armour'] = 0 * i['Level'] * i['Extra']
-                    i['Damage'] = 0 * i['Level'] * i['Extra']
-                    i['Dodge'] = 0 * i['Level'] * i['Extra']
+                    i['Armour'] = int(250 * (1.6**i['Level']))
+                    i['Damage'] = int((100 * i['Extra']) * (1.5**i['Level']))
+                    i['Dodge'] = int(20 * (1.05** i['Extra']))
+            text = await bot.say('The battle will begin shortly')
+            turn = True
+            data = []
+            while ud['Armour'] > 0 and md['Armour'] > 0:
+                s = '{}: {}hp VS {}: {}hp\n'.format(ud['Name'].upper(), ud['Armour'], md['Name'].upper(), md['Armour'])
+                if turn:
+                    if randint(0, 100) < md['Dodge']:
+                        data.append('{} has attacked but {} dodged!\n'.format(ud['Name'], md['Name']))
+                    else:
+                        data.append('{} has delt {} damage!\n'.format(ud['Name'], ud['Damage']))
+                        md['Armour'] -= ud['Damage']
+                else:
+                    if randint(0, 100) < ud['Dodge']:
+                        data.append('{} has attacked but {} dodged!\n'.format(md['Name'], ud['Name']))
+                    else:
+                        data.append('{} has delt {} damage!\n'.format(md['Name'], md['Damage']))
+                        ud['Armour'] -= md['Damage']
+                if len(data) > 5:
+                    s+= ''.join(data[-5:])
+                else:
+                    s+= ''.join(data)
 
-            await bot.say('{}\n{}'.format(ud, md))
+                await asyncio.sleep(.8)
+                turn = not turn
+                await bot.edit_message(text, s)
+            if ud['Armour'] <= 0:
+                await bot.say('{} has won!'.format(md['Name']))
+            elif md['Armour'] <= 0:
+                await bot.say('{} has won!'.format(ud['Name']))
+
+
+    @bot.command(pass_context=True)
+    async def stats(ctx):
+        user = ctx.message.author.name
+        name, classs, level, extra = cursor.execute('SELECT name, class, level, extra FROM characters WHERE ID = ?', (userid,)).fetchall()[0]
+        extra = len(extra.split(', '))
+        if classs == 'Warrior':
+            armour = int(300 * (1.6 ** level))
+            damage = int((110 * extra) * (1.5 ** level))
+            dodge = int(10 * (1.05 ** extra))
+        elif classs == 'Wizard':
+            armour = int(275 * (1.6 ** level))
+            damage = int((125 * extra)*(1.5 ** level))
+            dodge = int(15 * (1.05 ** extra))
+        elif classs == 'Rogue':
+            armour = int(250 * (1.6 ** level))
+            damage = int((100 * extra)*(1.5 ** level))
+            dodge = int(20 * (1.05 ** extra))
+
+        embed = discord.Embed(title='Stats', colour=discord.Colour.dark_red())
+        embed.set_author(name=user)
+        embed.add_field(name='Armour', value=armour)
+        embed.add_field(name='Damage', value=damage)
+        embed.add_field(name='Dodge', value=dodge)
+        embed.set_footer(text='At {}'.format(datetime.datetime.utcnow().strftime('%H:%M:%S, %d %a %b %y')))
+        await bot.say(embed=embed)
+
+
+    @bot.command(pass_context=True, aliases=['gamble', 'casino'])
+    async def gambling(ctx):
+        n = ctx.message.content.split(' ')[1:]
+        au = ctx.message.author
+        if len(n) != 1:
+            await bot.say('Please enter a correct amount to gamble eg: ``,gamble 100')
+        else:
+            try:
+                n = int(n)
+            except (ValueError, NameError):
+                await bot.say('Please enter an integer value.')
+        ug, rep = cursor.execute('SELECT gold, reputation FROM characters WHERE ID = ?', (au.id,)).fetchall()[0]
+        if check(cursor, 'characters', 'ID', au.id) == []:
+            await bot.say('Please make a character first to gamble.')
+        elif n > ug:
+            await bot.say('You do not have this much money to gamble with, stop trying to take loans!')
+        else:
+            ug -= n
+            mult = (n/10000)+ 1
+            if randint(0, 100) < randint(min(max((rep/5), 0), 49), 50):
+                await bot.say('Congratulations! Your {}G have become {}G'.format(n, ng))
+                ug += int(n*mult)
+            else:
+                await bot.say("I'm sorry, better luck next time!")
+
+            cursor.execute('UPDATE characters SET gold = ? WHERE ID  = ?', (ug, user.id))
+
+
 if __name__ == '__main__':
     bot.run('NDQ4OTA4NjYxNjQxNzA3NTUw.DedAYg.E7rKIVT8dn5ufjuDBHVtxIMTR5g')
