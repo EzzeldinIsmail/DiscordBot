@@ -3,6 +3,7 @@ from discord import Embed, Colour
 from discord.ext.commands import Bot
 import time
 # from re import search
+import datetime
 from random import randint
 import asyncio
 from sys import exc_info
@@ -25,7 +26,7 @@ stored in a database using sqlite3, and only server related stuff is kept in tex
 ``` = indent monospace text
 """
 
-__version = '0.9.5'
+__version__ = '0.9.5'
 userid = ''
 msg: discord.Message = ''
 prefix = open('data.txt', 'r').readlines()[0].strip()
@@ -190,7 +191,7 @@ async def die():
 async def bots(*args):
     n = int(args[-1])
     for _ in range(n):
-        await bot.say(' '.join(args))
+        await bot.say(' '.join(args[:-1]))
         await asyncio.sleep(5)
     await bot_purge(n*2)
 
@@ -205,8 +206,11 @@ async def purge(ctx):
     await bot.purge_from(ctx.message.channel, check= lambda x: True, limit=n)
 
 
-@bot.command(aliases=['exit'])
-async def shutdown():
+@bot.command(pass_context=True, aliases=['exit'])
+async def shutdown(ctx):
+    if ctx.message.author.id != '235810944981139456':
+        await bot.say('Fuck off :middle_finger:')
+        return
     await bot.change_presence(status=discord.Status.offline)
     await asyncio.sleep(2)
     exit(5)
@@ -729,16 +733,13 @@ with connect('main.db') as db:
     @bot.command(pass_context=True, aliases=['gamble', 'casino', 'slots'])
     async def gambling(ctx):
         """Attempts to play slots"""
-        n = ctx.message.content.split(' ')[1:]
+        n = ctx.message.content.split(' ')[1]
         au = ctx.message.author
-        if len(n) != 1:
-            await bot.say('Please enter a correct amount to gamble eg: ``,gamble 100``')
-        else:
-            try:
-                n = int(n)
-            except (ValueError, NameError):
-                await bot.say('Please enter an integer value.')
-                return
+        try:
+            n = int(n)
+        except (ValueError, NameError):
+            await bot.say('Please enter an integer value.')
+            return
         ug, rep = cursor.execute('SELECT gold, reputation FROM characters WHERE ID = ?', (au.id,)).fetchall()[0]
         if check(cursor, 'characters', 'ID', au.id) == []:
             await bot.say('Please make a character first to gamble.')
@@ -756,7 +757,7 @@ with connect('main.db') as db:
         else:
             await bot.edit_message(txt, "I'm sorry, better luck next time!")
 
-        cursor.execute('UPDATE characters SET gold = ? WHERE ID  = ?', (ug, user.id))
+        cursor.execute('UPDATE characters SET gold = ? WHERE ID  = ?', (ug, au.id))
         db.commit()
 
 
@@ -822,48 +823,48 @@ with connect('main.db') as db:
 
             await bot.say(embed=embed)
 
-@bot.command(aliases=['book'])
-async def archive():
-    l = cursor.execute('SELECT name FROM lore').fetchall()
-    s = 'Archive data:\nName:\n'
-    for i in l:
-        s += '```{}```'.format(*i)
-    await bot.say(s)
+    @bot.command(aliases=['book'])
+    async def archive():
+        l = cursor.execute('SELECT name FROM lore').fetchall()
+        s = 'Archive data:\nName:\n'
+        for i in l:
+            s += '```{}```'.format(*i)
+        await bot.say(s)
 
 
-@bot.command()
-async def read(*s):
-    s = ' '.join(s)
-    s = s.capitalize()
-    if check(cursor, 'lore', 'name', s) == []:
-        await bot.say('The archive has no information about this, please tell us more...')
-        return
-
-    name, desc, lvl, req, ach, rep = cursor.execute('SELECT name, description, level, requirements, achievement, reputation FROM lore WHERE name =?',(s,)).fetchall()[0]
-    ul, ue, ua, ur = cursor.execute('SELECT level, extra, achievements, reputation FROM characters WHERE ID=?', (userid,)).fetchall()[0]
-    if lvl > ul:
-        await bot.say('You need to be at least level {} to access this information. Come back when you\'ve grown up.')
-        return
-    elif req != 'None':
-        if req not in ue.split(', '):
-            await bot.say('You need {} to access this data. I would suggest you go get it.')
-            return
-    elif ach != 'None':
-            if ach not in ua.split(', '):
-                await bot.say('You do need to earn the achievement {} before you can access this data. Chop! Chop! Get to work!'.format(ach))
-                return
-    elif rep != 0:
-        if rep < 0:
-            if ur > rep:
-                await bot.say('You need to reach {} rep to get this data. Wanna join the dark side?'.format(rep))
-                return
-        else:
-            await bot.say('You need to reach {} rep to get to this data. Have you considered joining a charity?'.format(rep))
+    @bot.command()
+    async def read(*s):
+        s = ' '.join(s)
+        s = s.capitalize()
+        if check(cursor, 'lore', 'name', s) == []:
+            await bot.say('The archive has no information about this, please tell us more...')
             return
 
-    embed = Embed(title=name, description=desc, colour=int('0xF0FFFF', 16))
+        name, desc, lvl, req, ach, rep = cursor.execute('SELECT name, description, level, requirements, achievement, reputation FROM lore WHERE name =?',(s,)).fetchall()[0]
+        ul, ue, ua, ur = cursor.execute('SELECT level, extra, achievements, reputation FROM characters WHERE ID=?', (userid,)).fetchall()[0]
+        if lvl > ul:
+            await bot.say('You need to be at least level {} to access this information. Come back when you\'ve grown up.')
+            return
+        elif req != 'None':
+            if req not in ue.split(', '):
+                await bot.say('You need {} to access this data. I would suggest you go get it.')
+                return
+        elif ach != 'None':
+                if ach not in ua.split(', '):
+                    await bot.say('You do need to earn the achievement {} before you can access this data. Chop! Chop! Get to work!'.format(ach))
+                    return
+        elif rep != 0:
+            if rep < 0:
+                if ur > rep:
+                    await bot.say('You need to reach {} rep to get this data. Wanna join the dark side?'.format(rep))
+                    return
+            else:
+                await bot.say('You need to reach {} rep to get to this data. Have you considered joining a charity?'.format(rep))
+                return
 
-    await bot.say(embed=embed)
+        embed = Embed(title=name, description=desc, colour=int('0xF0FFFF', 16))
+
+        await bot.say(embed=embed)
 
 
 if __name__ == '__main__':
