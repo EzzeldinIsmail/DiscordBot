@@ -3,6 +3,7 @@ from discord import Embed, Colour
 from discord.ext.commands import Bot
 import time
 # from re import search
+from itertools import cycle
 import datetime
 from random import randint
 import asyncio
@@ -17,6 +18,7 @@ from typing import Union
 # TODO add more weapons
 # TODO add more craftables
 # TODO ship dlc (upgrade ship and ship battles)
+# TODO show user gold in shop
 """
 The discord bot 315zizx meant for personal use and not completely modified for multi server use.
 This bot implementes most basic bot stuff excpet music (I like my laptop in one piece thank you),
@@ -47,6 +49,13 @@ def check(cursor, db: str, field: str, req: Union[str, int]):
     word = cursor.fetchall()
     return word
 
+async def tloop(interval, end, txt):
+    s = time.time()
+    for i in cycle(['.', '..', '...']):
+        await bot.edit_message(txt, txt.content+i)
+        await asyncio.sleep(interval)
+        if time.time() > s+end:
+            break
 
 @bot.event
 async def on_error(event, *args, **kwargs):
@@ -277,53 +286,54 @@ with connect('main.db') as db:
 
             await bot.say(embed=embed)
 
-    @bot.command(aliases=['ins'])
-    async def inspect(*args):
+    @bot.command(pass_context=True, aliases=['ins'])
+    async def inspect(ctx):
         """Displays other users' characters"""
-        name = ' '.join(args).capitalize().replace("'", "\'")
-        l = check(cursor, 'characters', 'name', name)
-        if l == []:         # Checks if the character exists
-            await bot.say('{} does not exist.'.format(name))
+        if len(ctx.message.mentions) > 1:
+            await bot.say('You cannot inspect more than one person at a time.')
+            return
+        elif check(cursor, 'characters', 'ID', ctx.message.mentions[0].id) == []:
+            await bot.say('This person does not have a character.')
+            return
+        id = ctx.message.mentions[0].id
+        if check(cursor, 'logs', 'ID', id) == []:           # Checks for pending wuests to display
+            quest = 'Currently no pending quests'
         else:
-            id = cursor.execute('SELECT ID FROM characters WHERE name = ?', (name,)).fetchall()[0][0]
-            if check(cursor, 'logs', 'ID', id) == []:           # Checks for pending wuests to display
-                quest = 'Currently no pending quests'
-            else:
-                quest = cursor.execute('SELECT name FROM logs WHERE ID = {}'.format(id)).fetchall()[0][0]
-            name, classs, exp, gold, level, achievements, role, reputation = cursor.execute('SELECT name, class, exp, gold, level, achievements, role, '
-                                                                                'reputation FROM characters WHERE name=?', (name,)).fetchall()[0]
-            user =  await bot.get_user_info(id)
-            user = user.name
+            quest = cursor.execute('SELECT name FROM logs WHERE ID = {}'.format(id)).fetchall()[0][0]
+        name, classs, exp, gold, level, achievements, role, reputation = cursor.execute('SELECT name, class, exp, gold, level, achievements, role, '
+                                                                            'reputation FROM characters WHERE ID=?', (id,)).fetchall()[0]
+        user =  await bot.get_user_info(id)
+        user = user.name
 
-            colour = 'FFFFFF'
-            if level < 10: colour = int('0xFF0000', 16)
-            elif level < 20: colour = int('0xFF7F00', 16)
-            elif level < 30: colour = int('0xFFFF00', 16)
-            elif level < 40: colour = int('0x00FF00', 16)
-            elif level < 50: colour = int('0x0000FF', 16)
-            elif level < 60: colour = int('0x4B0082', 16)
-            elif level < 70: colour = int('0x9400D3', 16)
+        colour = 'FFFFFF'
+        if level < 10: colour = int('0xFF0000', 16)
+        elif level < 20: colour = int('0xFF7F00', 16)
+        elif level < 30: colour = int('0xFFFF00', 16)
+        elif level < 40: colour = int('0x00FF00', 16)
+        elif level < 50: colour = int('0x0000FF', 16)
+        elif level < 60: colour = int('0x4B0082', 16)
+        elif level < 70: colour = int('0x9400D3', 16)
 
-            embed = Embed(              # Creates the character profile embed
-                title='Character details:',
-                colour=colour,
-            )
-            embed.set_footer(text='At {}'.format(datetime.datetime.utcnow().strftime('%H:%M:%S, %d %a %b %y')))  # Gets and formats current date&time
-            if role == 'None':
-                embed.set_author(name='{}'.format(user))
-            else:
-                embed.set_author(name='{} <{}>'.format(user, role))
-            embed.add_field(name='Name', value=name)
-            for i in achievements.split(', '):
-                embed.add_field(name='Achievement', value=i)
-            embed.add_field(name='Class', value=classs)
-            embed.add_field(name='Exp', value='{}/{}'.format(exp, limit(level)))
-            embed.add_field(name='Gold', value="{}G".format(gold))
-            embed.add_field(name='Level', value=level)
-            embed.add_field(name='Reputation', value=reputation)
-            embed.add_field(name='Current quest', value=quest)
+        embed = Embed(              # Creates the character profile embed
+            title='Character details:',
+            colour=colour,
+        )
+        embed.set_footer(text='At {}'.format(datetime.datetime.utcnow().strftime('%H:%M:%S, %d %a %b %y')))  # Gets and formats current date&time
+        if role == 'None':
+            embed.set_author(name='{}'.format(user))
+        else:
+            embed.set_author(name='{} <{}>'.format(user, role))
+        embed.add_field(name='Name', value=name)
+        for i in achievements.split(', '):
+            embed.add_field(name='Achievement', value=i)
+        embed.add_field(name='Class', value=classs)
+        embed.add_field(name='Exp', value='{}/{}'.format(exp, limit(level)))
+        embed.add_field(name='Gold', value="{}G".format(gold))
+        embed.add_field(name='Level', value=level)
+        embed.add_field(name='Reputation', value=reputation)
+        embed.add_field(name='Current quest', value=quest)
 
-            await bot.say(embed=embed)
+        await bot.say(embed=embed)
 
     @bot.command(pass_context=True, aliases=['character_make', 'make_character'])
     async def create(ctx):
@@ -437,9 +447,11 @@ with connect('main.db') as db:
             if check(cursor, 'logs', 'ID', userid) != []:  # Checks for already pending quests
                 await bot.say('You already have a quest pending.')
                 return
-            elif qr.lower() not in [x.lower() for x in cr] and qr.lower() != 'none':     # Checks if user has requirement for quest
-                await bot.say('You do not have the requirements to do this.')
-                return
+            elif qr.lower() != 'none':
+                for i in qr.lower().split(', '):
+                    if i not in [x.lower() for x in cr]:# Checks if user has requirement for quest
+                        await bot.say('You do not have the requirements to do this.')
+                        return
 
             failure = 20
             cursor.execute('SELECT level, achievement FROM quests WHERE name = "{}"'.format(name))
@@ -545,13 +557,15 @@ with connect('main.db') as db:
             cursor.execute('DELETE FROM logs WHERE ID = {}'.format(userid))  # Deletes quest from logs
             db.commit()
 
-    @bot.command(aliases=['store'])
-    async def shop():
+    @bot.command(pass_context=True, aliases=['store'])
+    async def shop(ctx):
         """Displays all the shop items"""
+        name, gold = cursor.execute('SELECT name, gold FROM characters WHERE ID =?', (ctx.message.author.id,)).fetchall()[0]
         lines = cursor.execute('SELECT name, price FROM shop ORDER BY price, name, description').fetchall()      # Gets all items from shop
-        s = 'Details: \n```{:<30}    {:<6}```\n'.format('Items', 'Price')
+        s = '{}: {}G \n```{:<30}    {:<6}```\n'.format(name, gold, 'Items', 'Price')
         for n, p in lines:
             s += '```{:<30}    {:<6}```'.format(n, p)          # Adds items with indent monospace style
+        s += '\n{}: {}G'.format(name, gold)
         await bot.say(s)
 
     @bot.command()
