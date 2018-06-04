@@ -11,13 +11,19 @@ from sys import exc_info
 from sqlite3 import connect, Cursor
 from typing import Union
 # TODO document discord api
+# TODO set_online
+# TODO change check to bool
+# TODO implement types and typing
+# TODO checking other people's stats and inv
 # TODO gold --> xp converter
-# TODO implement error checking
+# TODO implement error checking (oon_command_error)
+# TODO plan serverwide table
 # TODO check gold/min
 # TODO add more quests (from quests and items)
 # TODO add more weapons
 # TODO add more craftables
 # TODO ship dlc (upgrade ship and ship battles)
+# TODO add survival mode dlc (put in log and tell time and chance..., active/semi-active:come and go)
 # TODO show user gold in shop
 """
 The discord bot 315zizx meant for personal use and not completely modified for multi server use.
@@ -35,7 +41,7 @@ prefix = open('data.txt', 'r').readlines()[0].strip()
 channel = open('data.txt', 'r').readlines()[1].strip()
 client = discord.Client()
 bot: asyncio = Bot(command_prefix=prefix)
-discord.Message: asyncio
+
 
 def limit(lvl):
     return int(1000*1.5**(lvl-1))
@@ -68,7 +74,7 @@ async def on_error(event, *args, **kwargs):
 @bot.event
 async def on_member_join(member):
     roles = discord.utils.get(member.server.roles, name="Wait... You're Online?")    # Gets role
-    await bot.add_roles(member, roles)       # Adds role to new member
+    await bot.add_roles(member, roles)       # Adds role to new member (Make sure bot role is above that role)
     await bot.send_message(bot.get_channel(channel), "Welcome to the server <@{}>!".format(member.id)) # Weolcomes new member to server
 
 
