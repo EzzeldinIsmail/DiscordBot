@@ -20,6 +20,45 @@ def check(cursor, db: str, field: str, req: Union[str, int]):
 class Character:
     def __init__(self, author: Union[User]):
         """"""
+
+        def calcstat(self):
+            """ At lvl 20, 20 items
+                    Armour  Damage  Dodge
+            Warrior 3.63M   732K    26
+            Wizard  3.32M   831K    39
+            Rogue   3.02M   665K    66
+            """
+            if self.classs == 'Warrior':
+                self.armour = int(300 * (1.6 ** self.lvl))
+                self.damage = int((110 * self.lextra) * (1.5 ** self.lvl))
+                self.health = int((110 * self.lextra) * (1.5 ** self.lvl))
+                self.dodge = int(10 * (1.05 ** self.lextra))
+            elif self.classs == 'Wizard':
+                self.armour = int(275 * (1.6 ** self.lvl))
+                self.damage = int((125 * self.lextra) * (1.5 ** self.lvl))
+                self.health = int((125 * self.lextra) * (1.5 ** self.lvl))
+                self.dodge = int(15 * (1.05 ** self.lextra))
+            elif self.classs == 'Rogue':
+                self.armour = int(250 * (1.6 ** self.lvl))
+                self.damage = int((100 * self.lextra) * (1.5 ** self.lvl))
+                self.health = int((100 * self.lextra) * (1.5 ** self.lvl))
+                self.dodge = int(20 * (1.05 ** self.lextra))
+
+
+        def calcpet(self):
+            data = cursor.execute('SELECT name, species, exp, level, happiness FROM pets WHERE ID=?', (self.id,)).fetchall()
+            pet = cursor.execute('SELECT pet FROM characters WHERE ID=?', (self.id,)).fetchall()[0][0]
+            self.curpet = pet
+            if self.curpet != 'None':
+                self.pettypes = []
+                self.pets={}
+                for name, species, exp, level, happiness in data:
+                    self.pettypes.append(species)
+                    heal, damage, armour = cursor.execute('SELECT heal, damage, armour FROM zoo WHERE species = ?', (species,)).fetchall()[0]
+                    self.pets[species] = {'name': name, 'exp':exp, 'lvl':level, 'happiness':happiness, 'limit':int(100*1.5**(level-1)),
+                                          'heal':heal*level, 'dmg':damage*level, 'armour':armour*level, 'health':armour*level}
+                self.pet = self.pets[self.curpet]
+
         db = connect('main.db')
         cursor = db.cursor()
 
@@ -50,26 +89,38 @@ class Character:
             elif self.lvl < 60: self.colour = int('0x4B0082', 16)
             elif self.lvl < 70: self.colour = int('0x9400D3', 16)
 
-            """ At lvl 20, 20 items
-                    Armour  Damage  Dodge
-            Warrior 3.63M   732K    26
-            Wizard  3.32M   831K    39
-            Rogue   3.02M   665K    66
-            """
-            if self.classs == 'Warrior':
-                self.armour = int(300 * (1.6 ** self.lvl))
-                self.damage = int((110 * self.lextra) * (1.5 ** self.lvl))
-                self.health = int((110 * self.lextra) * (1.5 ** self.lvl))
-                self.dodge = int(10 * (1.05 ** self.lextra))
-            elif self.classs == 'Wizard':
-                self.armour = int(275 * (1.6 ** self.lvl))
-                self.damage = int((125 * self.lextra) * (1.5 ** self.lvl))
-                self.health = int((125 * self.lextra) * (1.5 ** self.lvl))
-                self.dodge = int(15 * (1.05 ** self.lextra))
-            elif self.classs == 'Rogue':
-                self.armour = int(250 * (1.6 ** self.lvl))
-                self.damage = int((100 * self.lextra) * (1.5 ** self.lvl))
-                self.health = int((100 * self.lextra) * (1.5 ** self.lvl))
-                self.dodge = int(20 * (1.05 ** self.lextra))
+            calcstat(self)
+
+            calcpet(self)
         else:
             self.char = False
+
+    def stats(self):
+        return (self.armour, self.damage, self.dodge)
+
+    def haspet(self, name):
+        if self.pets.get(name):
+            return True
+        else:
+            return False
+
+    def pet_update(self):
+        with connect('main.db') as db:
+            cursor = db.cursor()
+            for i in self.pettypes:
+                cursor.execute('UPDATE pets SET exp=?, level=?, happiness=? WHERE ID=? AND species=?',
+                               (self.pets[i]['exp'], self.pets[i]['lvl'], self.pets[i]['happiness'],
+                                self.id, i))
+        db.commit()
+
+    def happiness(self):
+        self.pet['happiness'] = min(1000, self.pet['happiness'] + 25)
+        for i in self.pettypes:
+            self.pets[i]['happiness'] -= 5
+
+    def char_update(self):
+        with connect('main.db') as db:
+            cursor = db.cursor()
+            cursor.execute('UPDATE characters SET exp=?, gold=?, level=?, extra=?, achievements=?, reputation=?, role=?, pet=? WHERE ID=?',
+                           (self.exp, self.gold, self.lvl, self.extra, self.ach, self.rep, self.role, self.curpet, self.id))
+            db.commit()

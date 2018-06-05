@@ -16,15 +16,15 @@ from typing import Union
 # TODO set_online
 # TODO implement types and typing
 # TODO crit chance
-# TODO Contemplate character object
 # TODO gold --> xp converter
-# TODO implement error checking (on_command_error)
-# TODO plan serverwide table
+# TODO error checking (on_command_error)
 # TODO check gold/min
 # TODO rebalance pvp
 # TODO add more quests (from quests and items)
 # TODO add more weapons
 # TODO add more craftables
+# TODO add more lore (decriptions)
+# TODO add seperation comments
 # TODO ship dlc (upgrade ship and ship battles)
 # TODO add survival mode dlc (put in log and tell time and chance..., active/semi-active:come and go)
 # TODO pet/minion DLC
@@ -34,7 +34,7 @@ from typing import Union
 The discord bot 315zizx meant for personal use and not completely modified for multi server use.
 This bot implementes most basic bot stuff excpet music (I like my laptop in one piece thank you),
 it also has the text based mmorpg currently under development and improvement. All user data is 
-stored in a database using sqlite3, and only server related stuff is kept in text filed.
+stored in a database using sqlite3.
 `` = monospace text
 ``` = indent monospace text
 """
@@ -42,12 +42,10 @@ stored in a database using sqlite3, and only server related stuff is kept in tex
 __version__ = '0.9.5'
 userid = ''
 msg: discord.Message = ''
-prefix = open('data.txt', 'r').readlines()[0].strip()
-channel = open('data.txt', 'r').readlines()[1].strip()
 client = discord.Client()
-bot: asyncio = Bot(command_prefix=prefix)
+bot: asyncio = Bot(command_prefix=',')
 
-def arg(ctx): return ' '.join(ctx.message.content.split(' ')[1:])  # Returns arguments
+def arg(ctx): return ' '.join(ctx.message.content.strip().split(' ')[1:])  # Returns arguments
 
 def check(cursor, db: str, field: str, req: Union[str, int]):
     """Used to check if req exists in the database"""
@@ -65,12 +63,25 @@ async def tloop(interval, end, txt):
         if time.time() > s+end:
             break
 
+async def record(ctx, message):
+    channel, send = cursor.execute('SELECT bot, record FROM servers WHERE ID = ?',(ctx.message.server.id,)).fetchall()[0]
+    if send != 'N':
+        await bot.send_message(bot.get_channel(channel), message)
+
+
 @bot.event
-async def on_error(event, *args, **kwargs):
-    if event == 'quests' and args == []:
-        await bot.say('You have to pass the level of the quest that you would like to recieve.')
-    else:
-        raise exc_info()
+async def on_server_join(server):
+    with connect('main.db') as db:
+        cursor = db.cursor()
+        cursor.execute('INSERT INTO servers VALUES (?, ?, ?, ?, ?)', (server.id, 'None', 'None', 'N', 'N'))
+        db.commit()
+
+@bot.event
+async def on_server_remove(server):
+    with connect('main.db') as db:
+        cursor = db.cursor()
+        cursor.execute('DELETE FROM servers WHERE ID = ?', (server.id,))
+        db.commit()
 
 
 @bot.event
@@ -83,7 +94,10 @@ async def on_member_join(member):
 @bot.event
 async def on_ready():
     await bot.change_presence(game=discord.Game(name='PyCharm'))    # Sets status to playing PyCharm
-    # await bot.send_message(bot.get_channel(channel), "I am online!")
+    data = cursor.execute('SELECT online, bot FROM servers').fetchall()
+    for send, channel in data:
+        if send != 'N':
+            await bot.send_message(bot.get_channel(channel), "I am online!")
 
 
 @bot.event                          # Event handler at start of every function
@@ -94,6 +108,7 @@ async def on_message(message):              # Async function to handle multiple 
     global msg
     userid = message.author.id
     msg = message
+    prefix = ','
     if message.content.startswith(prefix):
         if message.content.lower() == prefix+'help':    # All commands
             await bot.send_message(message.author, """
@@ -140,30 +155,31 @@ async def on_message(message):              # Async function to handle multiple 
 async def version(): await bot.say(__version)
 
 
-@bot.command()
-async def set_prefix(pr):
-    with open('data.txt', 'r+') as f:
-        lines = f.readlines()
-        lines[0] = pr+'\n'
-        f.seek(0, 0)
-        f.truncate()
-        f.writelines(lines)
+@bot.command(pass_context=True)
+async def set_channel(ctx):
+    """Sets the channel for the bot to talk in"""
+    cursor.execute('UPDATE servers SET bot=? WHERE ID=?', (ctx.message.channel.id, ctx.message.server.id))
+    db.commit()
+    await bot.send_message(ctx.message.channel, '{} has been declared mine.'.format(ctx.message.channel.name))
+
+
+@bot.command(pass_context=True, aliases=['record'])
+async def rec(ctx):
+    serid=ctx.message.server.id
+    send = cursor.execute('SELECT record FROM servers WHERE ID =?',(serid,)).fetchall()[0][0]
+    if send != 'N':
+        cursor.execute('UPDATE servers SET record = ? WHERE ID = ?', ('N', serid))
+        await bot.send_message(ctx.message.channel, 'Recording has been turned off.')
+    else:
+        cursor.execute('UPDATE servers SET record = ? WHERE ID = ?', ('Y', serid))
+        await bot.send_message(ctx.message.channel, 'Recording has been turned on.')
+        await record(ctx, 'HELLO WORLD!')
+    db.commit()
+
 
 @bot.command(pass_context=True)
 async def trial(ctx):
     await bot.say(type(ctx) == discord.ext.commands.context.Context)
-
-
-@bot.command(pass_context=True)
-async def set_channel(ctx):
-    """Sets the channel for the bot to talk in"""
-    message = ctx.message
-    with open('data.txt', 'r+') as f:
-        lines = f.readlines()
-        lines[0] = "{}\n".format(message.channel.id)
-        f.seek(0, 0)
-        f.truncate()
-        f.writelines(lines)
 
 
 @bot.command()
@@ -280,6 +296,7 @@ with connect('main.db') as db:
                            (userid, name.replace("'", "\'").capitalize(), classs.capitalize(), 0, 100, 1, extra))
             db.commit()
             await bot.say('You have successfuly created the character {}, class {}'.format(name, classs))
+            await record('{} has created the character {}.'.format(char.username, name.replace("'", "\'")))
         else:
             await bot.say('You already have a character.')
 
@@ -392,39 +409,42 @@ with connect('main.db') as db:
         """Starts a pvp battle between the user and the person mentioned"""
         if not 0 < len(ctx.message.mentions) < 2:  # Checks that the battle is only between two users
             await bot.say('Wrong amount of mentions.')
-        else:
-            char2 = Character(ctx.message.mentions[0])
-            text = await bot.say('The battle will begin shortly')
-            turn = True
-            data = []
-            while char.armour > 0 and char2.armour > 0:
-                s = '{}: {}/{}hp VS {}: {}/{}hp\n'.format(
-                    char.charname.upper(), char.armour, char.health, char2.charname.upper(), char2.armour, char2.health)
-                if turn:
-                    if randint(0, 99) < char2.dodge:
-                        data.append('{} has attacked but {} dodged!\n'.format(char.charname, char2.charname))
-                    else:
-                        data.append('{} has delt {} damage!\n'.format(char.charname, char.damage))
-                        char2.armour -= char.damage
-                else:
-                    if randint(0, 99) < char.dodge:
-                        data.append('{} has attacked but {} dodged!\n'.format(char2.charname, char.charname))
-                    else:
-                        data.append('{} has delt {} damage!\n'.format(char2.charname, char2.damage))
-                        char.armour -= char2.damage
+            return
 
-                if len(data) > 5:
-                    s += ''.join(data[-5:])
+        char2 = Character(ctx.message.mentions[0])
+        text = await bot.say('The battle will begin shortly')
+        turn = True
+        data = []
+        while char.armour > 0 and char2.armour > 0:
+            s = '{}: {}/{}hp VS {}: {}/{}hp\n'.format(
+                char.charname.upper(), char.armour, char.health, char2.charname.upper(), char2.armour, char2.health)
+            if turn:
+                if randint(0, 99) < char2.dodge:
+                    data.append('{} has attacked but {} dodged!\n'.format(char.charname, char2.charname))
                 else:
-                    s += ''.join(data)
+                    data.append('{} has delt {} damage!\n'.format(char.charname, char.damage))
+                    char2.armour -= char.damage
+            else:
+                if randint(0, 99) < char.dodge:
+                    data.append('{} has attacked but {} dodged!\n'.format(char2.charname, char.charname))
+                else:
+                    data.append('{} has delt {} damage!\n'.format(char2.charname, char2.damage))
+                    char.armour -= char2.damage
 
-                await asyncio.sleep(.8)
-                turn = not turn  # Flips turn so other user attacks
-                await bot.edit_message(text, s)
-            if char.armour <= 0:
-                await bot.say('{} has won!'.format(char2.charname))
-            elif char2.armour <= 0:
-                await bot.say('{} has won!'.format(char.charname))
+            if len(data) > 5:
+                s += ''.join(data[-5:])
+            else:
+                s += ''.join(data)
+
+            await asyncio.sleep(.8)
+            turn = not turn  # Flips turn so other user attacks
+            await bot.edit_message(text, s)
+        if char.armour <= 0:
+            await bot.say('{} has won!'.format(char2.charname))
+            await record(ctx, '{} has battled {} and {} has won!'.format(char.username, char2.username, char2.username))
+        elif char2.armour <= 0:
+            await bot.say('{} has won!'.format(char.charname))
+            await record(ctx, '{} has battled {} and {} has won!'.format(char.username, char2.username, char.username))
 
 
     @bot.command()
@@ -473,47 +493,54 @@ with connect('main.db') as db:
             await bot.say(embed=embed)
 
 
-    @bot.command(aliases=['log_quest'])
-    async def start(*args):
+    @bot.command(pass_context=True, aliases=['log_quest'])
+    async def start(ctx):
         """Starts quest for user"""
-        name = ' '.join(args).capitalize().replace("'", "\'")
+        name = arg(ctx).capitalize().replace("'", "\'")
         if check(cursor, 'quests', 'name', name):  # Checks if quest exists
             await bot.say('Quest {} was not found.'.format(name))
+            return
+        qr = cursor.execute('SELECT requirement FROM quests WHERE name = "{}"'.format(name)).fetchall()[0][0]
+        cr = char.extra.split(', ')
+
+        if char.curquest != 'Currently no pending quests':  # Checks for already pending quests
+            await bot.say('You already have a quest pending.')
+            return
+        elif qr.lower() != 'none':
+            for i in qr.lower().split(', '):
+                if i not in [x.lower() for x in cr]:# Checks if user has requirement for quest
+                    await bot.say('You do not have the requirements to do this.')
+                    return
+
+        failure = 20
+        ql, achv = cursor.execute('SELECT level, achievement FROM quests WHERE name = "{}"'.format(name)).fetchall()[0] # Gets quest level
+        cl = char.lvl
+        if ql == 0:
+            failure = 0
+        elif achv != 'None' and ql > 30:
+            failure = 40
+
+        if ql > cl:  # Changes failure rate
+            failure += int((ql-cl) * 8.67)
+        elif cl > ql:
+            failure -= int((cl-ql) * 5)
+
+        if char.curpet != 'None':
+            failure -= char.pet['lvl']
+
+        failure = min(max(failure, 0), 100)
+        tim, exp, gold =  cursor.execute('SELECT time, exp, gold FROM quests WHERE name = "{}"'.format(name)).fetchall()[0]  # Gets quest info
+        cursor.execute('INSERT INTO logs(ID, time, duration, exp, gold, name, failure) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                       (char.id, int(time.time()), tim, exp, gold, name, failure))  # Logs quest info
+        db.commit()             # commits changes
+        if tim < 60:
+            await bot.say('Your character has started adventuring on quest {} for {}mins, {} exp and {}G, wish them luck!' .format(name, tim, exp, gold))
+            # prints quest confirmation
         else:
-            qr = cursor.execute('SELECT requirement FROM quests WHERE name = "{}"'.format(name)).fetchall()[0][0]
-            cr = char.extra.split(', ')
+            await bot.say('Your character has started adventuring on quest {} for {}h and {}mins, {} exp and {}G, wish them luck!'
+                          .format(name, (tim//60), (tim % 60), exp, gold))
 
-            if char.curquest != 'Currently no pending quests':  # Checks for already pending quests
-                await bot.say('You already have a quest pending.')
-                return
-            elif qr.lower() != 'none':
-                for i in qr.lower().split(', '):
-                    if i not in [x.lower() for x in cr]:# Checks if user has requirement for quest
-                        await bot.say('You do not have the requirements to do this.')
-                        return
-
-            failure = 20
-            ql, achv = cursor.execute('SELECT level, achievement FROM quests WHERE name = "{}"'.format(name)).fetchall()[0] # Gets quest level
-            cl = char.lvl
-            if ql == 0:
-                failure = 0
-            elif achv != 'None' and ql > 30:
-                failure = 40
-            elif ql > cl:  # Changes failure rate
-                failure += int((ql-cl) * 8.67)
-            elif cl > ql:
-                failure -= int((cl-ql) * 5)
-            failure = min(max(failure, 0), 100)
-            tim, exp, gold =  cursor.execute('SELECT time, exp, gold FROM quests WHERE name = "{}"'.format(name)).fetchall()[0]  # Gets quest info
-            cursor.execute('INSERT INTO logs(ID, time, duration, exp, gold, name, failure) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                           (char.id, int(time.time()), tim, exp, gold, name, failure))  # Logs quest info
-            db.commit()             # commits changes
-            if tim < 60:
-                await bot.say('Your character has started adventuring on quest {} for {}mins, {} exp and {}G, wish them luck!' .format(name, tim, exp, gold))
-                # prints quest confirmation
-            else:
-                await bot.say('Your character has started adventuring on quest {} for {}h and {}mins, {} exp and {}G, wish them luck!'
-                              .format(name, (tim//60), (tim % 60), exp, gold))
+        await record(ctx, '{} has started on the quest {}.'.format(char.username, name))
 
 
     @bot.command(pass_context=True)
@@ -529,6 +556,7 @@ with connect('main.db') as db:
         cursor.execute('DELETE FROM logs WHERE ID = ?', (char.id,))
         db.commit()
         await bot.say('{} quest abandoned'.format(name))
+        await record(ctx, '{} has abandoned the quest {}.'.format(char.username, name))
 
 
     @bot.command(pass_context=True, aliases=['collect_quest', 'finish'])
@@ -585,9 +613,20 @@ with connect('main.db') as db:
 
             cursor.execute('UPDATE characters SET exp=?, gold=?, level =?, achievements=?, reputation=?, extra=? WHERE ID = ?',
                            (char.exp, char.gold, char.lvl, char.ach, char.rep, char.extra, char.id))
+            db.commit()
+            if char.curpet != 'None':
+                char.pet['exp'] += int(exp*(10/100))
+                if char.pet['exp'] > char.pet['limit']:
+                    char.pet['exp'] %= char.pet['limit']
+                    char.pet['lvl'] += 1
+                char.happiness()
+                char.pet_update()
+                char.gold -= 100
+                char.char_update()
             # Updates character stats
             db.commit()
             await bot.say('"{}" quest collected.'.format(name))
+            await record(ctx, '{} has finished the quest {}.'.format(char.username, name))
             cursor.execute('DELETE FROM logs WHERE ID = {}'.format(char.id))  # Deletes quest from logs
             db.commit()
 
@@ -625,31 +664,36 @@ with connect('main.db') as db:
             await bot.say(embed=embed)
 
 
-    @bot.command()
-    async def buy(*args):
+    @bot.command(pass_context=True)
+    async def buy(ctx):
         """Buys item for user's character"""
-        name = ' '.join(args).capitalize().replace("'", "\\'")
+        name = arg(ctx).capitalize().replace("'", "\'")
         if not char.char:             # Checks if the user has a character
             await bot.say('You need to make a character first before you can access the shop, use the command make_character {name} {class}.')
+            return
         elif check(cursor, 'shop', 'name', name):               # Checks if the item exists
             await bot.say('This item does not exist')
-        else:
-            desc, ig, ic, ir  = cursor.execute("SELECT description, price, class, requirement FROM shop WHERE name ='{}'".format(name)).fetchall()[0]
-            if ig > char.gold:  # Checks if the user has enough money to buy the item
-                await bot.say('You do not have enough money to buy this item.')
-            elif char.extra != 'None' and name in char.extra.split(', '):           # Checks if user already has item
-                await bot.say('You already have this item.')
-            elif ic != 'None' and ic != char.classs:                         # Checks if the item is not class specific
-                await bot.say('This is item is locked off only for the {} class.'.format(ic))
-            elif ir != 'None' and ir not in char.extra.split(', '):         # Checks if the user does not already have the item
-                await bot.say('This item requires you to have {} before you buy it.'.format(ir))
-            else:
-                char.gold -= ig
-                if char.extra == 'None': char.extra = name
-                else: char.extra += ', {}'.format(name)         # Updates users items
-                cursor.execute("UPDATE characters SET gold ={}, extra= '{}' WHERE ID = {}".format(char.gold, char.extra, char.id))
-                db.commit()
-                await bot.say('Congratulations!:tada: You bought {}: ``{}`` for {}G and now you have {}G left'.format(name, desc, ig, char.gold))
+            return
+        desc, ig, ic, ir  = cursor.execute("SELECT description, price, class, requirement FROM shop WHERE name ='{}'".format(name)).fetchall()[0]
+        if ig > char.gold:  # Checks if the user has enough money to buy the item
+            await bot.say('You do not have enough money to buy this item.')
+            return
+        elif char.extra != 'None' and name in char.extra.split(', '):           # Checks if user already has item
+            await bot.say('You already have this item.')
+            return
+        elif ic != 'None' and ic != char.classs:                         # Checks if the item is not class specific
+            await bot.say('This is item is locked off only for the {} class.'.format(ic))
+            return
+        elif ir != 'None' and ir not in char.extra.split(', '):         # Checks if the user does not already have the item
+            await bot.say('This item requires you to have {} before you buy it.'.format(ir))
+            return
+        char.gold -= ig
+        if char.extra == 'None': char.extra = name
+        else: char.extra += ', {}'.format(name)         # Updates users items
+        cursor.execute("UPDATE characters SET gold ={}, extra= '{}' WHERE ID = {}".format(char.gold, char.extra, char.id))
+        db.commit()
+        await bot.say('Congratulations!:tada: You bought {}: ``{}`` for {}G and now you have {}G left'.format(name, desc, ig, char.gold))
+        await record(ctx, '{} has bought the item {}.'.format(char.username, name))
 
 
     @bot.command(aliases=['craft_list'])
@@ -715,6 +759,7 @@ with connect('main.db') as db:
         char.extra = ', '.join(ue)
         cursor.execute('UPDATE characters SET extra =? WHERE ID =?', (char.extra, char.id))
         await bot.say('You have sucessfuly carfted the item: {}'.format(item))
+        await record(ctx, '{} has crafted {}'.format(char.username, item))
         db.commit()
 
 
@@ -764,6 +809,174 @@ with connect('main.db') as db:
         await bot.say(embed=embed)
 
 
+    @bot.command(aliases=['pet_store'])
+    async def zookeeper():
+        lines = cursor.execute('SELECT species, price FROM zoo ORDER BY species').fetchall()  # Gets all items from shop
+        s = 'Details: \n {}: {}G\n```{:<30}    {:<30}```\n'.format(char.charname, char.gold, 'Species', 'Price')
+        for sp, p in lines:
+            s += '```{:<30}    {:<30}```'.format(sp, p)  # Adds items with indent monospace style
+        await bot.say(s)
+
+
+    @bot.command(pass_context=True)
+    async def check_out(ctx):
+        species = arg(ctx).capitalize()
+        if check(cursor, 'zoo', 'species', species):
+            await bot.say('This pet does not exist')
+            return
+        desc, species, price, heal, damage, armour = cursor.execute('SELECT description, species, price, heal, damage, armour FROM zoo WHERE species =?',
+                                                                    (species,)).fetchall()[0]
+        embed = Embed(title=species, description=desc)
+        embed.add_field(name='Species', value=species)
+        embed.add_field(name='Price', value=price)
+        embed.add_field(name='Heal', value=heal)
+        embed.add_field(name='Damage', value=damage)
+        embed.add_field(name='Armour', value=armour)
+
+        await bot.say(embed=embed)
+
+
+    @bot.command(pass_context=True)
+    async def adopt(ctx):
+        species = arg(ctx).capitalize()
+        if not char.char:
+            await bot.say('I\'m sorry but we only adobt fighting creatures to heros, would you be interested in a hamster?')
+            return
+        elif check(cursor, 'zoo', 'species', species):
+            await bot.say('We do not have any pets in that species, did you discover a new type?')
+            return
+        price = cursor.execute('SELECT price FROM zoo WHERE species=?', (species,)).fetchall()[0][0]
+        if char.curpet != 'None':
+            if species in char.pettypes:
+                await bot.say('You can only have one pet per species.')
+                return
+        if price > char.gold:
+            await bot.say('You do not have enough income to adobt this pet')
+            return
+        desc = cursor.execute('SELECT description FROM zoo WHERE species=?', (species,)).fetchall()[0][0]
+        char.gold -= price
+        await bot.say('What do you want to name it?')
+        name = await bot.wait_for_message(author=ctx.message.author, channel=ctx.message.channel)
+        cursor.execute('INSERT INTO pets VALUES (?, ?, ?, ?, ?, ?)',(char.id, name.content.capitalize(), species, 0, 1, 100))
+        db.commit()
+        char.char_update()
+        await bot.say('Congratulations! You have rescued the a {} pet: {} Thank you for helping this poor animal!'.format(species, desc))
+        await record(ctx, '{} has adopted a {} pet called {}.'.format(char.username, species, name.content.capitalize()))
+
+
+    @bot.command(pass_context=True)
+    async def my_pets(ctx):
+        embed = Embed(title='Pet room', description='{} pets'.format(len(char.pettypes)))
+        for i in char.pettypes:
+            embed.add_field(name='Pet', value=i)
+            embed.add_field(name='Name', value=char.pets[i]['name'])
+            embed.add_field(name='Happiness', value=char.pets[i]['happiness'])
+
+        await bot.say(embed=embed)
+
+
+    @bot.command(pass_context=True)
+    async def my_pet(ctx):
+        name = arg(ctx).capitalize()
+        if name not in char.pettypes:
+            await bot.say('You do not have this pet.')
+            return
+
+        embed = Embed(title=char.pets[name]['name'])
+        embed.add_field(name='Exp', value=char.pets[name]['exp'])
+        embed.add_field(name='Level', value=char.pets[name]['lvl'])
+        embed.add_field(name='Happiness', value=char.pets[name]['happiness'])
+        embed.add_field(name='Heal', value=char.pets[name]['heal'])
+        embed.add_field(name='Damage', value=char.pets[name]['dmg'])
+        embed.add_field(name='Armour', value=char.pets[name]['armour'])
+
+        await bot.say(embed=embed)
+
+    @bot.command(pass_context=True)
+    async def set_pet(ctx):
+        species = arg(ctx).capitalize()
+        if species not in char.pettypes:
+            await bot.say('You do not own this type of pet to set it as your companion.')
+            return
+        cursor.execute('UPDATE characters SET pet=? WHERE ID=?', (species, char.id))
+        db.commit()
+
+
+    @bot.command(pass_context=True)
+    async def lose(ctx):
+        species = arg(ctx).capitalize()
+        if species not in char.pettypes:
+            await bot.say('You do not own a pet of this species.')
+            return
+        cursor.execute('DELETE FROM pets WHERE ID=? AND species=?', (char.id, species))
+        if char.curpet == species:
+            cursor.execute('UPDATE characters SET pet=? WHERE ID=?', ('None', char.id))
+        db.commit()
+        await bot.say('You have lost the pet type {}.'.format(species))
+        await record(ctx, '{} has lost the pet type {}.'.format(char.username, species))
+
+    @bot.command(pass_context=True)
+    async def pet_battle(ctx):
+        if not 0 < len(ctx.message.mentions) < 2:  # Checks that the battle is only between two users
+            await bot.say('Wrong amount of mentions.')
+            return
+        char2= Character(ctx.message.mentions[0])
+        text = await bot.say('The battle will begin shortly')
+        turn = True
+        data = []
+        while char.pet['armour'] > 0 and char2.pet['armour']> 0:
+            s = '{}: {}/{}hp VS {}: {}/{}hp\n'.format(
+                char.pet['name'].upper(), char.pet['armour'], char.pet['health'],
+                char2.pet['name'].upper(), char2.pet['armour'], char2.pet['health'])
+            if turn:
+                if randint(0, 99) < ((char.pet['happiness']/1000)*100):
+                    data.append('{} has delt {}dmg and managed to heal themselves!\n'.
+                                format(char.pet['name'], char.pet['dmg']))
+                    char.pet['armour'] = min(char.pet['health'], char.pet['armour']+char.pet['heal'])
+                    char2.pet['armour'] -= char.pet['dmg']
+                else:
+                    data.append('{} has delt {} damage!\n'.format(char.pet['name'], char.pet['dmg']))
+                    char2.pet['armour'] -= char.pet['dmg']
+            else:
+                if randint(0, 99) < ((char2.pet['happiness']/1000)*100):
+                    data.append('{} has delt {}dmg and managed to heal themselves!\n'.
+                                format(char2.pet['name'], char2.pet['dmg']))
+                    char2.pet['armour'] = min(char2.pet['health'], char2.pet['armour'] + char2.pet['heal'])
+                    char.pet['armour'] -= char2.pet['dmg']
+                else:
+                    data.append('{} has delt {} damage!\n'.format(char2.pet['name'], char2.pet['dmg']))
+                    char.pet['armour'] -= char2.pet['dmg']
+
+            if len(data) > 5:
+                s += ''.join(data[-5:])
+            else:
+                s += ''.join(data)
+
+            await asyncio.sleep(.8)
+            turn = not turn  # Flips turn so other user attacks
+            await bot.edit_message(text, s)
+        if char.pet['armour'] <= 0:
+            await bot.say('{}\'s pet {} has won!'.format(char2.username, char2.pet['name']))
+            await record(ctx, '{}\'s pet has battled {}\'s pet and {}\'s pet has won!'.
+                         format(char.username, char2.username, char2.username))
+        elif char2.pet['armour'] <= 0:
+            await bot.say('{}\'s pet {} has won!'.format(char.username, char.pet['name']))
+            await record(ctx, '{}\'s pet has battled {}\'s pet and {}\'s pet has won!'.
+                         format(char.username, char2.username, char.username))
+
+
+    @bot.command(pass_context=True)
+    async def start_ship(ctx):
+        if 'Ship' not in char.extra.split(', '):
+            await bot.say('Please buy a ship before starting your sea adventures.')
+            return
+        await bot.say('Please enter the name of your ship:')
+        name = await bot.wait_for_message(author=ctx.message.author, channel=ctx.message.channel)
+        cursor.execute('INSERT INTO ships VALUES (?, ?, ?, ?, ?, ?)', (char.id, name.content.capitalize(), 0, 1, 1, ''))
+        db.commit()
+
+
+
     @bot.command(pass_context=True, aliases=['gamble', 'casino', 'slots'])
     async def gambling(ctx):
         """Attempts to play slots"""
@@ -781,17 +994,17 @@ with connect('main.db') as db:
             return
         txt = await bot.say('Pulling lever... :slot_machine:')
         char.gold -= n
-        mult = (n/10000)+ 1
-        if randint(0, 99) < randint(min(max((char.rep/5), 0), 49), 50):
+        mult = (n / 10000) + 1
+        if randint(0, 99) < randint(min(max((char.rep / 5), 0), 49), 50):
             char.gold += int(n * mult)
-            await bot.edit_message(txt,'Congratulations! Your {}G have become {}G and now you have {}G in total!'.format(n, int(n*mult), char.gold))
-
+            await bot.edit_message(txt, 'Congratulations! Your {}G have become {}G and now you have {}G in total!'.format(n, int(n * mult), char.gold))
+            await record(ctx, '{} has gained {}G.'.format(char.username, (n * mult) - n))
         else:
             await bot.edit_message(txt, "I'm sorry, better luck next time!")
+            await record(ctx, '{} has lost {}G.'.format(char.username, n))
 
         cursor.execute('UPDATE characters SET gold = ? WHERE ID  = ?', (char.gold, char.id))
         db.commit()
-
 
     @bot.command()
     async def role(person, *args):
@@ -805,7 +1018,6 @@ with connect('main.db') as db:
         else:
             await bot.say('You do not have permission to give people roles.')
 
-
     @bot.command()
     async def leaderboard():
         """Gets all characters leaderboard"""
@@ -815,7 +1027,7 @@ with connect('main.db') as db:
             colour=Colour.lighter_grey()
         )
         for name, level, exp in details:
-            embed.add_field(name=name, value="Level:{}, exp:{}/{}".format(level, exp, limit(level)), inline=False)
+            embed.add_field(name=name, value="Level:{}, exp:{}/{}".format(level, exp, int(1000 * 1.5 ** (level - 1))), inline=False)
 
         await bot.say(embed=embed)
 
