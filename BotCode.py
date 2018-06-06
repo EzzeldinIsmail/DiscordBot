@@ -11,6 +11,7 @@ import asyncio
 from sys import exc_info
 from sqlite3 import connect, Cursor
 from typing import Union
+from random import choice
 
 # TODO document discord api
 # TODO set_online
@@ -27,7 +28,8 @@ from typing import Union
 # TODO add seperation comments
 # TODO ship dlc (upgrade ship and ship battles)
 # TODO add survival mode dlc (put in log and tell time and chance..., active/semi-active:come and go)
-# TODO pet/minion DLC
+# TODO giving money
+# TODO tavern DLC
 # TODO subclasses (own level) DLC
 
 """
@@ -892,6 +894,22 @@ with connect('main.db') as db:
 
         await bot.say(embed=embed)
 
+
+    @bot.command(pass_context=True)
+    async def interact(ctx):
+        species = arg(ctx).capitalize()
+        if char.curpet == 'None':
+            await bot.say('You do not have a pet to interact with.')
+            return
+        char.pet['happiness'] += 20
+        gif = choice([
+            'mOxCUSoRZ7vDq/giphy.gif', 't3yZAynLPVkGY/200w.gif', 'Ul16jlcdV1B04/200w.gif', 'l0ExvA6hnrdzQ5zoI/200w.gif', 'xTiTnp3zOLUGbBF4ME/200w.gif',
+            'OzjugO1GZzaxy/200w.gif'
+
+        ])
+        await bot.say('You have sucessfully petted your pet, here is a special surprise for you:\n'+'https://media.giphy.com/media/' + gif)
+
+
     @bot.command(pass_context=True)
     async def set_pet(ctx):
         species = arg(ctx).capitalize()
@@ -915,8 +933,8 @@ with connect('main.db') as db:
         await bot.say('You have lost the pet type {}.'.format(species))
         await record(ctx, '{} has lost the pet type {}.'.format(char.username, species))
 
-    @bot.command(pass_context=True)
-    async def pet_battle(ctx):
+    @bot.command(pass_context=True, aliases=['pet_battle'])
+    async def pokemon(ctx):
         if not 0 < len(ctx.message.mentions) < 2:  # Checks that the battle is only between two users
             await bot.say('Wrong amount of mentions.')
             return
@@ -975,6 +993,25 @@ with connect('main.db') as db:
         cursor.execute('INSERT INTO ships VALUES (?, ?, ?, ?, ?, ?)', (char.id, name.content.capitalize(), 0, 1, 1, ''))
         db.commit()
 
+
+    @bot.command(pass_context=True)
+    async def sail(ctx):
+        try:
+            n = int(arg(ctx))
+        except (TypeError, ValueError):
+            await bot.say('Please enter a number for the amount of time you wish to sail for.')
+            return
+
+        if char.ship == 'None':
+            await bot.say('Get a ship before you set sail.')
+            return
+        elif char.sailing:
+            await bot.say('You are already sailing.')
+            return
+
+        cursor.execute('INSERT INTO shiplogs VALUES (?, ?, ?)', (char.id, int(time.time()), n))
+        db.commit()
+        await bot.say('You have started sailing.')
 
 
     @bot.command(pass_context=True, aliases=['gamble', 'casino', 'slots'])

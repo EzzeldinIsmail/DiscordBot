@@ -59,6 +59,15 @@ class Character:
                                           'heal':heal*level, 'dmg':damage*level, 'armour':armour*level, 'health':armour*level}
                 self.pet = self.pets[self.curpet]
 
+
+        def calcship(self):
+            try:
+                self.ship, self.shipexp, self.shiplvl, self.crew, self.improve\
+                    = cursor.execute('SELECT name, exp, level, crew, improvements FROM ships WHERE ID=?', (self.id,)).fetchall()[0]
+                self.sailing = cursor.execute('SELECT ID FROM shiplogs WHERE ID=?', (self.id,)).fetchall()
+            except IndexError:
+                self.ship = 'None'
+
         db = connect('main.db')
         cursor = db.cursor()
 
@@ -92,6 +101,8 @@ class Character:
             calcstat(self)
 
             calcpet(self)
+
+            calcship(self)
         else:
             self.char = False
 
