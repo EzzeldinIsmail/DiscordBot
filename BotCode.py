@@ -2,7 +2,7 @@ import discord
 from discord import Embed, Colour, Message
 from discord.ext.commands import Bot
 import time
-# from re import search
+from re import search, I
 from disclib import Character
 from itertools import cycle
 import datetime
@@ -12,6 +12,7 @@ from sys import exc_info
 from sqlite3 import connect, Cursor
 from typing import Union
 from random import choice
+from math import ceil
 
 # TODO document discord api
 # TODO set_online
@@ -26,8 +27,6 @@ from random import choice
 # TODO add more craftables
 # TODO add more lore (decriptions)
 # TODO add seperation comments
-# TODO ship dlc (upgrade ship and ship battles)
-# TODO add survival mode dlc (put in log and tell time and chance..., active/semi-active:come and go)
 # TODO giving money
 # TODO tavern DLC
 # TODO subclasses (own level) DLC
@@ -88,9 +87,14 @@ async def on_server_remove(server):
 
 @bot.event
 async def on_member_join(member):
-    roles = discord.utils.get(member.server.roles, name="Wait... You're Online?")    # Gets role
-    await bot.add_roles(member, roles)       # Adds role to new member (Make sure bot role is above that role)
-    await bot.send_message(bot.get_channel(channel), "Welcome to the server <@{}>!".format(member.id)) # Weolcomes new member to server
+    with connect('main.db') as db:
+        cursor = db.cursor()
+        channel = cursor.execute('SELECT bot FROM servers WHERE ID=?', (member.server.id,)).fetchall()[0][0]
+    for i in member.server.roles:
+        if i.name == "Wait... You're Online?":
+            roles = discord.utils.get(member.server.roles, name="Wait... You're Online?")    # Gets role
+            await bot.add_roles(member, roles)       # Adds role to new member (Make sure bot role is above that role)
+    await bot.send_message(bot.get_channel(channel), "Welcome to the server <@{}>!".format(member.id)) # Welcomes new member to server
 
 
 @bot.event
@@ -359,7 +363,7 @@ with connect('main.db') as db:
         embed = Embed(title='Stats', colour=Colour.dark_red())      # Creates user stats' embed
         embed.set_author(name=char.charname)
         embed.add_field(name='Armour', value=char.armour)
-        embed.add_field(name='Damage', value=char.damage)
+        embed.add_field(name='Damage', value=char.dmg)
         embed.add_field(name='Dodge', value=char.dodge)
         embed.set_footer(text='At {}'.format(datetime.datetime.utcnow().strftime('%H:%M:%S, %d %a %b %y')))
         await bot.say(embed=embed)
@@ -397,7 +401,7 @@ with connect('main.db') as db:
         embed.add_field(name='Current quest', value=char.curquest)
 
         embed.add_field(name='Armour', value=char.armour)
-        embed.add_field(name='Damage', value=char.damage)
+        embed.add_field(name='Damage', value=char.dmg)
         embed.add_field(name='Dodge', value=char.dodge)
 
         for i in char.extra.split(', '):
@@ -424,14 +428,14 @@ with connect('main.db') as db:
                 if randint(0, 99) < char2.dodge:
                     data.append('{} has attacked but {} dodged!\n'.format(char.charname, char2.charname))
                 else:
-                    data.append('{} has delt {} damage!\n'.format(char.charname, char.damage))
-                    char2.armour -= char.damage
+                    data.append('{} has delt {} damage!\n'.format(char.charname, char.dmg))
+                    char2.armour -= char.dmg
             else:
                 if randint(0, 99) < char.dodge:
                     data.append('{} has attacked but {} dodged!\n'.format(char2.charname, char.charname))
                 else:
-                    data.append('{} has delt {} damage!\n'.format(char2.charname, char2.damage))
-                    char.armour -= char2.damage
+                    data.append('{} has delt {} damage!\n'.format(char2.charname, char2.dmg))
+                    char.armour -= char2.dmg
 
             if len(data) > 5:
                 s += ''.join(data[-5:])
@@ -606,13 +610,12 @@ with connect('main.db') as db:
                 pass
             else:
                 if randint(0, 99) < 20:
-                    await bot.say('Congratulations! You have found the item {}.'.format(item))
                     if char.extra == 'None':
                         char.extra = item
                     else:
                         char.extra += ', {}'.format(item)
 
-
+                    await bot.say('Congratulations! You have found the item {}.'.format(item))
             cursor.execute('UPDATE characters SET exp=?, gold=?, level =?, achievements=?, reputation=?, extra=? WHERE ID = ?',
                            (char.exp, char.gold, char.lvl, char.ach, char.rep, char.extra, char.id))
             db.commit()
@@ -907,7 +910,9 @@ with connect('main.db') as db:
             'OzjugO1GZzaxy/200w.gif'
 
         ])
-        await bot.say('You have sucessfully petted your pet, here is a special surprise for you:\n'+'https://media.giphy.com/media/' + gif)
+        embed= Embed(title='You have sucessfully petted your pet, here is a special surprise for you')
+        embed.set_image(url='https://media.giphy.com/media/' + gif)
+        await bot.say(embed=embed)
 
 
     @bot.command(pass_context=True)
@@ -974,11 +979,11 @@ with connect('main.db') as db:
             turn = not turn  # Flips turn so other user attacks
             await bot.edit_message(text, s)
         if char.pet['armour'] <= 0:
-            await bot.say('{}\'s pet {} has won!'.format(char2.username, char2.pet['name']))
+            await bot.say('{} has won!'.format(char2.pet['name']))
             await record(ctx, '{}\'s pet has battled {}\'s pet and {}\'s pet has won!'.
                          format(char.username, char2.username, char2.username))
         elif char2.pet['armour'] <= 0:
-            await bot.say('{}\'s pet {} has won!'.format(char.username, char.pet['name']))
+            await bot.say('{} has won!'.format(char.pet['name']))
             await record(ctx, '{}\'s pet has battled {}\'s pet and {}\'s pet has won!'.
                          format(char.username, char2.username, char.username))
 
@@ -990,7 +995,7 @@ with connect('main.db') as db:
             return
         await bot.say('Please enter the name of your ship:')
         name = await bot.wait_for_message(author=ctx.message.author, channel=ctx.message.channel)
-        cursor.execute('INSERT INTO ships VALUES (?, ?, ?, ?, ?, ?)', (char.id, name.content.capitalize(), 0, 1, 1, ''))
+        cursor.execute('INSERT INTO ships VALUES (?, ?, ?, ?, ?, ?)', (char.id, name.content.capitalize(), 0, 1, 1, 'None'))
         db.commit()
 
 
@@ -1008,40 +1013,328 @@ with connect('main.db') as db:
         elif char.sailing:
             await bot.say('You are already sailing.')
             return
+        elif char.shiplvl < (n/60):
+            await bot.say('Your level {} ship cannot sail for this long.'.format(char.shiplvl))
+            return
 
         cursor.execute('INSERT INTO shiplogs VALUES (?, ?, ?)', (char.id, int(time.time()), n))
         db.commit()
         await bot.say('You have started sailing.')
 
 
-    @bot.command(pass_context=True, aliases=['gamble', 'casino', 'slots'])
-    async def gambling(ctx):
-        """Attempts to play slots"""
-        n = ctx.message.content.split(' ')[1]
-        try:
-            n = int(n)
-        except (ValueError, NameError):
-            await bot.say('Please enter an integer value.')
+    @bot.command(pass_context=True)
+    async def dock(ctx):
+        if check(cursor, 'shiplogs', 'ID', char.id):
+            await bot.say('You did not go sailing.')
             return
-        if not char.char:
-            await bot.say('Please make a character to access the heros casino.')
+        elif char.docktime > time.time():
+            await bot.say('Your ship did not finish sailing.')
             return
-        elif n > char.gold:
-            await bot.say('You do not have this much money to gamble with, stop trying to take loans!')
-            return
-        txt = await bot.say('Pulling lever... :slot_machine:')
-        char.gold -= n
-        mult = (n / 10000) + 1
-        if randint(0, 99) < randint(min(max((char.rep / 5), 0), 49), 50):
-            char.gold += int(n * mult)
-            await bot.edit_message(txt, 'Congratulations! Your {}G have become {}G and now you have {}G in total!'.format(n, int(n * mult), char.gold))
-            await record(ctx, '{} has gained {}G.'.format(char.username, (n * mult) - n))
-        else:
-            await bot.edit_message(txt, "I'm sorry, better luck next time!")
-            await record(ctx, '{} has lost {}G.'.format(char.username, n))
 
-        cursor.execute('UPDATE characters SET gold = ? WHERE ID  = ?', (char.gold, char.id))
+        char.gold += (char.sailduration /60) *50
+        char.shipexp += char.sailduration
+        if char.shipexp > char.shiplimit:
+            char.shipexp %= char.shiplimit
+            char.shiplvl += 1
+            char.crew += char.shiplvl
+
+        char.ship_update()
+        char.char_update()
+        cursor.execute('DELETE FROM shiplogs WHERE ID=?', (char.id,))
         db.commit()
+        await bot.say('You have finished sailing.')
+
+    @bot.command(pass_context=True)
+    async def upgrades(ctx):
+        lines = cursor.execute('SELECT name, price FROM cabin ORDER BY price, name, description').fetchall()  # Gets all items from shop
+        s = '{}: {}G \n```{:<30}    {:<6}```\n'.format(char.charname, char.gold, 'Improvement', 'Price')
+        for n, p in lines:
+            s += '```{:<30}    {:<6}```'.format(n, p)  # Adds items with indent monospace style
+        s += '\n{}: {}G'.format(char.charname, char.gold)
+        await bot.say(s)
+
+    @bot.command(pass_context=True)
+    async def improve(ctx):
+        item = arg(ctx).capitalize()
+        if item in char.improve.split(', '):
+            await bot.say('You already have this improvement.')
+            return
+
+        if check(cursor, 'cabin', 'name', item):
+            await bot.say('This improvement does not exist.')
+            return
+
+        price, req, crew, lvl = cursor.execute('SELECT price, requirement, crew, level FROM cabin WHERE name=?', (item,)).fetchall()[0]
+
+        if price > char.gold:
+            await bot.say('You do not have enough gold for this item.')
+            return
+        elif crew > char.crew:
+            await bot.say('You do not have enough crew to buy this item.')
+            return
+        elif lvl > ship.lvl:
+            await bot.say('Your level is not high enough to buy this improvement.')
+        elif req != 'None':
+            for i in req.split(', '):
+                if i not in char.improve.split(', '):
+                    await bot.say('You do not have the requirement to build this imrpovement.')
+                    return
+
+        char.gold -= price
+        if char.improve == 'None':
+            char.improve = '{}'.format(item)
+        else:
+            char.improve += ', {}'.format(item)
+        char.char_update()
+        char.ship_update()
+        await bot.say('You have sucessfult bought an improvement.')
+
+    @bot.command(pass_context=True)
+    async def ship_battle():
+        if not 0 < len(ctx.message.mentions) < 2:  # Checks that the battle is only between two users
+            await bot.say('Wrong amount of mentions.')
+            return
+
+        char2 = Character(ctx.message.mentions[0])
+        text = await bot.say('The battle will begin shortly')
+        turn = True
+        data = []
+        while char.shiparmour > 0 and char2.shiparmour > 0:
+            s = ':ship: {}: {}/{}hp VS :ship: {}: {}/{}hp\n'.format(
+                char.ship.upper(), char.shiparmour, char.shiphealth, char2.ship.upper(), char2.shiparmour, char2.shiphealth)
+            if turn:
+                data.append('{} has delt {} damage!\n'.format(char.ship, char.shipdmg))
+                char2.shiparmour -= char.shipdmg
+            else:
+                data.append('{} has delt {} damage!\n'.format(char2.ship, char2.shipdmg))
+                char.shiparmour -= char2.shipdmg
+
+
+            if randint(0, 99) < 20:
+                n = randint(0, 99)
+                if n > char.shipluck:
+                    data.append('The storm has come dealing {} to {}!\n'.format(char.shiphealth*(5/100), char.ship))
+                    char.shiparmour -= char.shiphealth*(5/100)
+                if n > char.shipluck:
+                    data.append('The storm has come dealing {} to {}!\n'.format(char2.shiphealth*(5/100), char2.ship))
+                    char2.shiparmour -= char2.shiphealth*(5/100)
+
+            if len(data) > 5:
+                s += ''.join(data[-5:])
+            else:
+                s += ''.join(data)
+
+            await asyncio.sleep(.8)
+            turn = not turn  # Flips turn so other user attacks
+            await bot.edit_message(text, s)
+        if char.armour <= 0:
+            await bot.say('{} has won!'.format(char2.ship))
+            await record(ctx, '{}\'s ship has battled {}\'s ship and {}\'s ship has won!'.format(char.username, char2.username, char2.username))
+        elif char2.armour <= 0:
+            await bot.say('{} has won!'.format(char.ship))
+            await record(ctx, '{}\'s ship has battled {}\'s ship and {}\'s ship has won!'.format(char.username, char2.username, char.username))
+
+
+    @bot.command(pass_context=True)
+    async def arena(ctx):
+        if char.curquest != 'Currently no pending quests':
+            await bot.say('You are currently on a quest so you cannot enter the arena.')
+            return
+        if char.curpet != 'None':
+            strength = ceil(char.lvl*2 + char.pet['lvl']/2)
+        else:
+            strength = char.lvl*2
+        cursor.execute('INSERT INTO arenalogs VALUES (?, ?, ?, ?, ?)', (self.id, time.time(), 5, strength, 1))
+        db.commit()
+        await bot.say('You have entered the arena, good luck!')
+
+    @bot.command(pass_context=True)
+    async def rest(ctx):
+        if self.stage == 0:
+            await bot.say('You did not start the arena to rest.')
+            return
+        elif self.exit > time.time():
+            await bot.say('You are still on stage {}.'.format(self.stage))
+            return
+        if char.strength < randint(0, self.stage*2):
+            await bot.say('You have failed the arena.')
+            return
+
+        await bot.say('You have finished stage {}. Would you like to continue?'.format(self.stage))
+        ans = bot.wait_for_message(author=ctx.message.author, channel=ctx.message.channel)
+        if search('\Wy\W', ans, I):
+            await bot.say('You have progressed on to the next stage!')
+            char.stage += 1
+            char.arena_update()
+            return
+
+        for i in range(1, char.stage+1):
+            cursor.execute('SELECT name, weight FROM arenarewards WHERE level = ?', (i,)).fetchall()
+            names = [x for x, y in n]
+            weights = [y for x, y in n]
+            item = choices(names, weights)
+            if item in char.extra.split(', '):
+                await bot.say('You have found an item that you already have.')
+            elif char.extra == 'None':
+                char.extra = item
+                await bot.say('You have cashed out and earned {}!')
+            else:
+                await bot.say('You have cashed out and earned {}!')
+                char.extra += ', {}'.format(item)
+
+        cursor.execute('DELETE FROM arenalogs WHERE ID=?', (char.id,))
+        char.char_update()
+        db.commit()
+
+    @bot.command(pass_context=True)
+    async def arenarewards(ctx):
+        lines = cursor.execute('SELECT name, level FROM arenarewards ORDER BY level').fetchall()  # Gets all items from shop
+        s = '{}: {}G \n```{:<30}    {:<6}```\n'.format(char.charname, char.gold, 'Name', 'At stage')
+        for n, l in lines:
+            s += '```{:<30}    {:<6}```'.format(n, l)  # Adds items with indent monospace style
+        s += '\n{}: {}G'.format(char.charname, char.gold)
+        await bot.say(s)
+
+    @bot.command(pass_context=True)
+    async def check_reward(ctx):
+        name = arg(ctx).capitalize()
+        if check(cursor, 'arenarewards', 'name', name):             # Checks if the item exists
+            await bot.say("The reward you want to inspect does not exist.")
+        else:
+            name, desc, stage, chance = cursor.execute('SELECT name, description, level, weight FROM arenarewards WHERE name =?',
+                                                      (name,)).fetchall()[0]  # Gets item details
+
+            embed = Embed(          # Creates item embed
+                title=name,
+                description=desc,
+                colour=Colour.dark_green()
+            )
+            embed.add_field(name='Stage', value=stage)
+            embed.add_field(name='Chance', value='{}%'.format(chance))
+
+            await bot.say(embed=embed)
+
+    @bot.command(pass_context=True)
+    async def subclasses(ctx):
+        await bot.say('Not ready')
+        return
+        if char.sub != 'None':
+            await bot.say('You already have a subclass.')
+            return
+        elif char.lvl < 20:
+            await bot.say('Your character is not a high level enough to attempt to achieve a subclass')
+            return
+
+        if char.classs == 'Warrior':
+            await bot.say('You have the option to choose between: paladin, guardian, mercenary.')
+            ans = await bot.wait_for_message(author=ctx.message.author, channel=ctx.message.channel)
+            ans = ans.content.lower()
+            while ans != 'paladin' and ans != 'guardian' and ans != 'mercenary':
+                await bot.say('You did not enter the right subclass.')
+                ans = await bot.wait_for_message(author=ctx.message.author, channel=ctx.message.channel)
+                ans = ans.content.lower()
+
+
+
+    @bot.command(pass_context=True)
+    async def tavern(ctx):
+        if not char.char:
+            await bot.say('Please make a character to access the heros tavern.')
+            return
+        await bot.say('What would you like to do here?\n``gamble``, ``fight``, ``drink``, ``bid``')
+        ans = bot.wait_for_message(60, author=ctx.message.author, channel=ctx.message.channel)
+        ans = ans.content.lower()
+        if ans == 'gamble':
+            n = await bot.wait_for_message('How much would you like to gamble:')
+            n = n.content.lower()
+            try:
+                n = int(n)
+            except (ValueError, NameError):
+                await bot.say('Please enter an integer value.')
+                return
+
+            if n > char.gold:
+                await bot.say('You do not have this much money to gamble with, stop trying to take loans!')
+                return
+            txt = await bot.say('Pulling lever... :slot_machine:')
+            char.gold -= n
+            mult = (n / 10000) + 1
+            if randint(0, 99) < randint(min(max((char.rep / 5), 0), 49), 50):
+                char.gold += int(n * mult)
+                await bot.edit_message(txt, 'Congratulations! Your {}G have become {}G and now you have {}G in total!'.format(n, int(n * mult), char.gold))
+                await record(ctx, '{} has gained {}G.'.format(char.username, (n * mult) - n))
+            else:
+                await bot.edit_message(txt, "I'm sorry, better luck next time!")
+                await record(ctx, '{} has lost {}G.'.format(char.username, n))
+
+            cursor.execute('UPDATE characters SET gold = ? WHERE ID  = ?', (char.gold, char.id))
+            db.commit()
+        elif ans == 'fight':
+            if randint(0, 99) > char.lvl*2:
+                await bot.say('You have fought someone stronger thank you and lost + your money got taken away. GG')
+                char.gold -= (char.gold*(1/100))
+                char.char_update()
+            else:
+                await bot.say('Congrats, you won this fight and some people were impressed by your bravery.')
+                if char.ship != 'None':
+                    char.crew += 5
+                    char.ship_update()
+        elif ans == 'drink':
+            await bot.say('You have been challenged to a drinking competition, will you accept?')
+            ans = await bot.wait_for_message(20, author=ctx.message.author, channel=ctx.message.channel)
+            ans = ans.content.lower()
+            if search('\Wy\W', ans, I):
+                luck = self.lvl*2 + abs(char.rep) if char.rep < 0 else char.lvl * 2
+                if randint(0,99) > luck:
+                    await bot.say('You have passed out from too much drinking and have gotten pickpocketed.')
+                    char.gold -= (char.gold * (1 / 100))
+                    char.char_update()
+                else:
+                    await bot.say('The other person has passed out drunk and you win your drinking bet. GGWP')
+                    char.gold += (char.gold * (1 / 100))
+                    char.char_update()
+            elif ans is None:
+                await bot.say('You took too long to answer and now your hero has started daydreaming, happy?')
+                return
+            else:
+                await bot.say('Then why did you pick the drinking option in the first place??')
+                return
+        elif ans == 'bid':
+            await bot.say('Not available')
+            return
+            n = cursor.execute('SELECT count(*) FROM tavern').fetchall()[0][0]
+            item, price = cursor.execute('SELECT item, price FROM tavern').fetchall()[randint(0, n)]
+            await bot.say('We will now bid on the item: {}, well start the bidding at {}\n One more person needs to join the bidding, to join type ``bid``'
+                          .format(item, price))
+            def biddable(msg):
+                char2= Character(msg.author)
+                return char2.char
+
+            ans = await bot.wait_for_message(60, channel=ctx.message.channel, content='bid', check=biddable)
+            if ans is None:
+                await bot.say('No one has joined the bidding so it will stop due to a lack of participants.')
+                return
+            char2 = Character(ans.author)
+            turn = True
+            def intable(msg):
+                try:
+                    int(msg.content)
+                    return True
+                except (ValueError, TypeError):
+                    return False
+
+            await bot.say('The bidding will start! If no one bids for 15secs the winner will be declared.')
+            ans = bot.wait_for_message(15, author=p, channel=ctx.message.channel, check=intable)
+            p = ans.author
+            while True:
+                if turn:
+                    p = await bot.get_user_info(char.id)
+                else:
+                    p = await bot.get_user_info(char2.id)
+                ans = bot.wait_for_message(15, author=p, channel=ctx.message.channel, check=intable)
+
+
+
 
     @bot.command()
     async def role(person, *args):
