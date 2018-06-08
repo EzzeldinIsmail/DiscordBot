@@ -280,38 +280,39 @@ with connect('main.db') as db:
             name = ' '.join(ctx.message.content.split(' ')[1:-1])  # Gets name
             classs = ctx.message.content.split(' ')[-1]  # Get class
         except IndexError:  # Preparation for errors
-            name = None
-            classs = None
-        if name is None or classs is None:  # Checks for wrong entry
             await bot.say('You have to enter a name and a class for the character eg:\n ```make_character Viktor Warrior```')
-        elif classs.lower() != 'rogue' and classs.lower() != 'warrior' and classs.lower() != 'wizard':  # Cheks for wrong class entry
+        if classs.lower() != 'rogue' and classs.lower() != 'warrior' and classs.lower() != 'wizard':  # Checks for wrong class entry
             await bot.say('You can only choose one of the three classes: warrior, wizard or rogue')
+            return
         elif ctx.message.author.bot:  # Checks for botting
             await bot.say('Bots cannot make characters')
-        elif check(cursor, 'characters', 'ID', userid):  # Checks if the user already has a character
-            extra = 'None'
-            # Creates standarised class names and items
-            if classs.lower() == 'warrior':
-                extra = 'Armour, Great axe'
-            elif classs.lower() == 'wizard':
-                extra = 'Glasses, Wand'
-            elif classs.lower() == 'rogue':
-                extra = 'Dagger, Lockpick'
-            cursor.execute('INSERT INTO characters(ID, name, class, exp, gold, level, extra) '
-                           'VALUES (?, ?, ?, ?, ?, ?, ?)',
-                           (userid, name.replace("'", "\'").capitalize(), classs.capitalize(), 0, 100, 1, extra))
-            db.commit()
-            await bot.say('You have successfuly created the character {}, class {}'.format(name, classs))
-            await record('{} has created the character {}.'.format(char.username, name.replace("'", "\'")))
-        else:
+            return
+        elif not check(cursor, 'characters', 'ID', userid):  # Checks if the user already has a character
             await bot.say('You already have a character.')
+            return
+        # Creates standarised class names and items
+        if classs.lower() == 'warrior':
+            extra = 'Armour, Great axe'
+        elif classs.lower() == 'wizard':
+            extra = 'Glasses, Wand'
+        elif classs.lower() == 'rogue':
+            extra = 'Dagger, Lockpick'
+        cursor.execute('INSERT INTO characters(ID, name, class, exp, gold, level, extra) '
+                       'VALUES (?, ?, ?, ?, ?, ?, ?)',
+                       (userid, name.replace("'", "\'").capitalize(), classs.capitalize(), 0, 100, 1, extra))
+        db.commit()
+        await bot.say('Congratulations! You have just started a long and hard journey to become a famous hero, you character {} will have to climb the ranks of '
+                      'the {}s and reach new heights in order to save people all over the globe and hunt down the most ferocious of monsters GLHF.'
+                      .format(name.capitalize(), classs.lower()))
+        await record('{} has created the character {}.'.format(char.username, name.replace("'", "\'")))
+
 
 
     @bot.command(pass_context=True, aliases=['char'])
     async def character(ctx):
         """Checks if the user has a character and creates one if they don't"""
         if not char.char:  # Checks if the user has a character
-            await bot.say('You do not have a character made please make a character by using the command make_character {name} {class}.')
+            await bot.say('You do not have a character made please make a character by using the command create {name} {class}.')
         else:
 
             embed = Embed(              # Creates the character profile embed
@@ -340,20 +341,19 @@ with connect('main.db') as db:
     async def inventory():
         """Displays the user's items"""
         if check(cursor, 'characters', 'ID', userid):
-            await bot.say('You do not have a character made please make a character by using the command make_character {name} {class}.')
-        else:
-            extra, name = cursor.execute('SELECT extra, name FROM characters WHERE ID = {}'.format(userid)).fetchall()[0]
-            embed = Embed(  # Creates the inventory embed
-                title='Character inventory:',
-                colour=Colour.gold(),
-                description='{} items'.format(len(extra.split(', ')))
-            )
-            embed.set_author(name=name)
-            embed.set_footer(text='At {}'.format(datetime.datetime.utcnow().strftime('%H:%M:%S, %d %a %b %y')))
-            for i in extra.split(', '):
-                embed.add_field(name='Item', value=i)
+            await bot.say('You do not have a character made please make a character by using the command create {name} {class}.')
+            return
+        embed = Embed(  # Creates the inventory embed
+            title='Character inventory:',
+            colour=Colour.gold(),
+            description='{} items'.format(char.lextra)
+        )
+        embed.set_author(name=char.charname)
+        embed.set_footer(text='At {}'.format(datetime.datetime.utcnow().strftime('%H:%M:%S, %d %a %b %y')))
+        for i in char.extra.split(', '):
+            embed.add_field(name='Item', value=i)
 
-            await bot.say(embed=embed)
+        await bot.say(embed=embed)
 
 
     @bot.command(pass_context=True)
@@ -372,7 +372,7 @@ with connect('main.db') as db:
     @bot.command(pass_context=True, aliases=['ins'])
     async def inspect(ctx):
         """Displays other users' characters"""
-        if len(ctx.message.mentions) > 1:
+        if len(ctx.message.mentions) != 1:
             await bot.say('You cannot inspect more than one person at a time.')
             return
         elif check(cursor, 'characters', 'ID', ctx.message.mentions[0].id):
@@ -413,11 +413,18 @@ with connect('main.db') as db:
     @bot.command(pass_context=True, aliases=['battle', 'attack'])
     async def pvp(ctx):
         """Starts a pvp battle between the user and the person mentioned"""
-        if not 0 < len(ctx.message.mentions) < 2:  # Checks that the battle is only between two users
+        if  len(ctx.message.mentions) != 1:  # Checks that the battle is only between two users
             await bot.say('Wrong amount of mentions.')
+            return
+        elif not char.char:
+            await bot.say('We do not host kid battles here, come back as a hero.')
             return
 
         char2 = Character(ctx.message.mentions[0])
+        if not char2.char:
+            await bot.say('The mention does not have a character. We only do hero vs hero fights here.')
+            return
+
         text = await bot.say('The battle will begin shortly')
         turn = True
         data = []
@@ -459,8 +466,7 @@ with connect('main.db') as db:
         if n is None:
             await bot.say('You need to give in the level of quests thats you want to retrieve eg:\n ```quests 1```')
         else:
-            cursor.execute('SELECT name, time FROM quests WHERE level = {} GROUP BY requirement, name ORDER BY name, time '.format(n))
-            lines = cursor.fetchall()
+            lines = cursor.execute('SELECT name, time FROM quests WHERE level = {} GROUP BY requirement, name ORDER BY name, time '.format(n)).fetchall()
             s = 'Details:\n``Level {} quests``\n'.format(n)
             s += ('\n```{:<30}    {:<5}```\n'.format('Name', 'Time'))  # Displayed in indent monospace mode so the characters line up
             for name in lines:
@@ -468,45 +474,53 @@ with connect('main.db') as db:
             await bot.say(s)
 
 
-    @bot.command()
-    async def quest(*args):
+    @bot.command(pass_context=True)
+    async def quest(ctx):
         """Displays the information for the quest"""
-        name = ' '.join(args).capitalize()
+        name = arg(ctx).capitalize()
         if check(cursor, 'quests', 'name', name):  # If the quest exists
             await bot.say('Quest {} was not found.'.format(name))
-        else:
-            lines = cursor.execute('SELECT * FROM quests WHERE name = "{}"'.format(name.replace("'", '\''))).fetchall()[0]  # Retrieves all quest data
-            desc, time, exp, gold, level, requirement, achievement, reputation, reward = lines[1:]
-            embed = Embed(              # Creates quest embed
-                title=name,
-                description=desc,
-                colour=Colour.red()
-            )
-            embed.add_field(name='Time', value='{}min'.format(time))
-            embed.add_field(name='Exp', value=exp)
-            embed.add_field(name='Gold', value='{}G'.format(gold))
-            embed.add_field(name='Achievement', value=achievement)
-            embed.add_field(name='Reputation', value=reputation)
-            embed.add_field(name='Level', value=level)
-            if requirement.find(', ') != -1:            # If there is multiple requirements do it a special way
-                embed.add_field(name='Reward', value=reward, inline=False)
-                for i in requirement.split(', '):
-                    embed.add_field(name='Requirement', value=i, inline=True)
-            else:
-                embed.add_field(name='Reward', value=reward)
-                embed.add_field(name='Requirement', value=requirement)
+            return
 
-            await bot.say(embed=embed)
+        desc, time, exp, gold, level, requirement, achievement, reputation, reward = \
+            cursor.execute('SELECT description, time, exp, gold, level, requiremnent, achievement, reputation, reward FROM quests WHERE name = ?', (name,)
+                           ).fetchall()[0]  # Retrieves all quest data
+
+        embed = Embed(              # Creates quest embed
+            title=name,
+            description=desc,
+            colour=Colour.red()
+        )
+        embed.add_field(name='Time', value='{}min'.format(time))
+        embed.add_field(name='Exp', value=exp)
+        embed.add_field(name='Gold', value='{}G'.format(gold))
+        embed.add_field(name='Achievement', value=achievement)
+        embed.add_field(name='Reputation', value=reputation)
+        embed.add_field(name='Level', value=level)
+        if requirement.find(', ') != -1:            # If there is multiple requirements do it a special way
+            embed.add_field(name='Reward', value=reward, inline=False)
+            for i in requirement.split(', '):
+                embed.add_field(name='Requirement', value=i, inline=True)
+        else:
+            embed.add_field(name='Reward', value=reward)
+            embed.add_field(name='Requirement', value=requirement)
+
+        await bot.say(embed=embed)
 
 
     @bot.command(pass_context=True, aliases=['log_quest'])
     async def start(ctx):
         """Starts quest for user"""
-        name = arg(ctx).capitalize().replace("'", "\'")
+        if not char.char:
+            await bot.say('I\'m sorry but you may only request a quest if you are a registered hero.')
+            return
+
+        name = arg(ctx).capitalize()
         if check(cursor, 'quests', 'name', name):  # Checks if quest exists
             await bot.say('Quest {} was not found.'.format(name))
             return
-        qr = cursor.execute('SELECT requirement FROM quests WHERE name = "{}"'.format(name)).fetchall()[0][0]
+
+        qr = cursor.execute('SELECT requirement FROM quests WHERE name = ?', (name,)).fetchall()[0][0]
         cr = char.extra.split(', ')
 
         if char.curquest != 'Currently no pending quests':  # Checks for already pending quests
@@ -519,7 +533,7 @@ with connect('main.db') as db:
                     return
 
         failure = 20
-        ql, achv = cursor.execute('SELECT level, achievement FROM quests WHERE name = "{}"'.format(name)).fetchall()[0] # Gets quest level
+        ql, achv = cursor.execute('SELECT level, achievement FROM quests WHERE name = ?', (name,)).fetchall()[0] # Gets quest level
         cl = char.lvl
         if ql == 0:
             failure = 0
@@ -535,12 +549,12 @@ with connect('main.db') as db:
             failure -= char.pet['lvl']
 
         failure = min(max(failure, 0), 100)
-        tim, exp, gold =  cursor.execute('SELECT time, exp, gold FROM quests WHERE name = "{}"'.format(name)).fetchall()[0]  # Gets quest info
+        tim, exp, gold =  cursor.execute('SELECT time, exp, gold FROM quests WHERE name = ?', (name,)).fetchall()[0]  # Gets quest info
         cursor.execute('INSERT INTO logs(ID, time, duration, exp, gold, name, failure) VALUES (?, ?, ?, ?, ?, ?, ?)',
                        (char.id, int(time.time()), tim, exp, gold, name, failure))  # Logs quest info
         db.commit()             # commits changes
         if tim < 60:
-            await bot.say('Your character has started adventuring on quest {} for {}mins, {} exp and {}G, wish them luck!' .format(name, tim, exp, gold))
+            await bot.say('Your hero has started adventuring on quest {} for {}mins, {} exp and {}G, wish them luck!' .format(name, tim, exp, gold))
             # prints quest confirmation
         else:
             await bot.say('Your character has started adventuring on quest {} for {}h and {}mins, {} exp and {}G, wish them luck!'
@@ -553,87 +567,84 @@ with connect('main.db') as db:
     async def abandon(ctx):
         """Abandons current quest"""
         if not char.char:
-            await bot.say('You do not have a character.')
+            await bot.say('You are not a hero... how did you even get a quest in the first place??')
             return
         elif char.curquest == 'Currently no pending quests':
-            await bot.say('You currently have no pending quests to give up.')
+            await bot.say('Sorry, but hero never started a quest so you can abandon it.')
             return
-        name = cursor.execute('SELECT name FROM logs WHERE ID = ?', (char.id,)).fetchall()[0][0]
+
         cursor.execute('DELETE FROM logs WHERE ID = ?', (char.id,))
         db.commit()
-        await bot.say('{} quest abandoned'.format(name))
+        await bot.say('{} quest abandoned'.format(char.curquest))
         await record(ctx, '{} has abandoned the quest {}.'.format(char.username, name))
 
 
     @bot.command(pass_context=True, aliases=['collect_quest', 'finish'])
     async def collect(ctx):
         """Collects already started quest"""
-        lines = cursor.execute('SELECT time, duration, exp, gold, name, failure FROM logs WHERE ID = ?', (char.id,)).fetchall()
-        if lines == []:  # Checks if there are currenlty any pending quests
-            await bot.say('You do not currently have a pending request.')
-        else:
-            tim, duration, exp, gold, name, failure = lines[0]
-            achievement, qrep, item = cursor.execute('SELECT achievement, reputation, reward FROM quests WHERE name = "{}"'.format(name)).fetchall()[0]
-            end = int(tim + (duration * 60))
-            if time.time() < end:  # Checks if the quest duraation has finished
-                until = (end - time.time())
-                await bot.say('Your quest is not done yet there is still {} mins and {} seconds.'.format(int(until / 60), int(until % 60)))
-                return
-            elif randint(0, 99) < failure:
-                cursor.execute('DELETE FROM logs WHERE ID = {}'.format(userid))  # Deletes quest from logs
-                db.commit()
-                await bot.say('You have failed this quest. Good luck next time!')
-                return
+        if not char.char:
+            await bot.say('You. Are. Not. A. Hero. Stop trying to pretend you are one.')
+            return
+        elif char.curquest == 'Currently no pending quests':  # Checks if there are currenlty any pending quests
+            await bot.say('Sorry but you did not start any quest to collect rewards.')
+            return
+        tim, duration, exp, gold, name, failure = \
+            cursor.execute('SELECT time, duration, exp, gold, name, failure FROM logs WHERE ID = ?', (char.id,)).fetchall()[0]
+        achievement, qrep, item = cursor.execute('SELECT achievement, reputation, reward FROM quests WHERE name = ?', (name,)).fetchall()[0]
+        end = int(tim + (duration * 60))
+        if end > time.time() :  # Checks if the quest duraation has finished
+            until = (end - time.time())
+            await bot.say('Your quest is not done yet there is still {} mins and {} seconds.'.format(int(until / 60), int(until % 60)))
+            return
+        elif randint(0, 99) < failure:
+            cursor.execute('DELETE FROM logs WHERE ID = {}'.format(userid))  # Deletes quest from logs
+            db.commit()
+            await bot.say('You have been knocked out during the quest and failed. Better luck next time!')
+            return
 
-            char.exp += exp  # Updates values
-            char.gold += gold
-            char.rep += qrep
-            if char.exp > char.limit:  # Checks if the user has leveled up
-                char.exp = char.exp % char.limit  # Calculates leftover xp
-                char.lvl += 1
-                await bot.say('Congratulations you have reached level {}'.format(char.lvl))  # Prints level up message
+        char.exp += exp  # Updates values
+        char.gold += gold
+        char.rep += qrep
+        if char.exp > char.limit:  # Checks if the user has leveled up
+            char.exp = char.exp % char.limit  # Calculates leftover xp
+            char.lvl += 1
+            await bot.say('Congratulations you have reached level {}'.format(char.lvl))  # Prints level up message
 
-            if achievement == 'None':
-                pass
-            elif achievement in char.ach.split(', '):
-                pass
+
+        if achievement != 'None' and achievement not in char.ach.split(', '):
+            await bot.say('Congratulations! You have gotten the achievement {}.'.format(achievement))
+            if char.ach == 'None':  # Leaves no beginning None
+                char.ach = achievement.capitalize()
             else:
-                await bot.say('Congratulations! You have gotten the achievement {}.'.format(achievement))
-                if char.ach == 'None':  # Leaves no beginning None
-                    char.ach = achievement.capitalize()
+                char.ach += ', {}'.format(achievement.capitalize())
+
+
+        if item != 'None' and item not in char.extra.split(', '):
+            if randint(0, 99) < 20:
+                if char.extra == 'None':
+                    char.extra = item
                 else:
-                    char.ach += ', {}'.format(achievement)
+                    char.extra += ', {}'.format(item)
 
-            if item == 'None':
-                pass
-            elif item in char.extra.split(', '):
-                pass
-            else:
-                if randint(0, 99) < 20:
-                    if char.extra == 'None':
-                        char.extra = item
-                    else:
-                        char.extra += ', {}'.format(item)
+                await bot.say('Congratulations! You have found the item {}.'.format(item))
+        char.char_update
 
-                    await bot.say('Congratulations! You have found the item {}.'.format(item))
-            cursor.execute('UPDATE characters SET exp=?, gold=?, level =?, achievements=?, reputation=?, extra=? WHERE ID = ?',
-                           (char.exp, char.gold, char.lvl, char.ach, char.rep, char.extra, char.id))
-            db.commit()
-            if char.curpet != 'None':
-                char.pet['exp'] += int(exp*(10/100))
-                if char.pet['exp'] > char.pet['limit']:
-                    char.pet['exp'] %= char.pet['limit']
-                    char.pet['lvl'] += 1
-                char.happiness()
-                char.pet_update()
-                char.gold -= 100
-                char.char_update()
-            # Updates character stats
-            db.commit()
-            await bot.say('"{}" quest collected.'.format(name))
-            await record(ctx, '{} has finished the quest {}.'.format(char.username, name))
-            cursor.execute('DELETE FROM logs WHERE ID = {}'.format(char.id))  # Deletes quest from logs
-            db.commit()
+        if char.curpet != 'None':
+            char.pet['exp'] += int(exp*(10/100))
+            if char.pet['exp'] > char.pet['limit']:
+                char.pet['exp'] %= char.pet['limit']
+                char.pet['lvl'] += 1
+                await bot.say('Congratulations your pet has leveled up!')
+            char.happiness()
+            char.pet_update()
+            char.gold -= 100
+            char.char_update()
+
+
+        await bot.say('Quest {} collected.'.format(name))
+        await record(ctx, '{} has finished the quest {}.'.format(char.username, name))
+        cursor.execute('DELETE FROM logs WHERE ID = ?', (char.id,))  # Deletes quest from logs
+        db.commit()
 
 
     @bot.command(pass_context=True, aliases=['store'])
@@ -651,22 +662,24 @@ with connect('main.db') as db:
     async def identify(*args):
         """Displays all informations about supplied item"""
         name = ' '.join(args).capitalize()
-        if check(cursor, 'shop', 'name', name):             # Checks if the item exists
-            await bot.say("The item you want to inspect does not exist.")
-        else:
-            desc, price, classs, req = cursor.execute('SELECT description, price, class, requirement FROM shop WHERE name = "{}"'.
-                                                      format(name)).fetchall()[0]  # Gets item details
+        if not char.char:
+            await bot.say('I\'m sorry kid but only heros can check out the items in my shop. But here you can check out this lolipop :lollipop:')
+            return
+        elif check(cursor, 'shop', 'name', name):             # Checks if the item exists
+            await bot.say("I do not have this item... know where I can find it?")
+            return
+        desc, price, classs, req = cursor.execute('SELECT description, price, class, requirement FROM shop WHERE name = ?', (name, )).fetchall()[0]
 
-            embed = Embed(          # Creates item embed
-                title=name,
-                description=desc,
-                colour=Colour.green()
-            )
-            embed.add_field(name='Price', value=price)
-            embed.add_field(name='Class requirement', value=classs)
-            embed.add_field(name='Item requirment', value=req)
+        embed = Embed(          # Creates item embed
+            title=name,
+            description=desc,
+            colour=Colour.green()
+        )
+        embed.add_field(name='Price', value=price)
+        embed.add_field(name='Class requirement', value=classs)
+        embed.add_field(name='Item requirment', value=req)
 
-            await bot.say(embed=embed)
+        await bot.say(embed=embed)
 
 
     @bot.command(pass_context=True)
@@ -674,30 +687,30 @@ with connect('main.db') as db:
         """Buys item for user's character"""
         name = arg(ctx).capitalize().replace("'", "\'")
         if not char.char:             # Checks if the user has a character
-            await bot.say('You need to make a character first before you can access the shop, use the command make_character {name} {class}.')
+            await bot.say('I don\'t know how you got in here kid but only heros can buy weapons.')
             return
         elif check(cursor, 'shop', 'name', name):               # Checks if the item exists
-            await bot.say('This item does not exist')
-            return
-        desc, ig, ic, ir  = cursor.execute("SELECT description, price, class, requirement FROM shop WHERE name ='{}'".format(name)).fetchall()[0]
-        if ig > char.gold:  # Checks if the user has enough money to buy the item
-            await bot.say('You do not have enough money to buy this item.')
+            await bot.say('This item isn\'t in my shop, maybe wait for the next restock.')
             return
         elif char.extra != 'None' and name in char.extra.split(', '):           # Checks if user already has item
-            await bot.say('You already have this item.')
+            await bot.say('Sorry {} but you can only have 1 of each item, don\'t be greedy now ya hear.'.format(char.charname))
             return
-        elif ic != 'None' and ic != char.classs:                         # Checks if the item is not class specific
-            await bot.say('This is item is locked off only for the {} class.'.format(ic))
+        desc, price, classs, req  = cursor.execute("SELECT description, price, class, requirement FROM shop WHERE name =?", (name,)).fetchall()[0]
+        if price > char.gold:  # Checks if the user has enough money to buy the item
+            await bot.say('Sorry {} but it seems you\'re broke. May I advice a mining quest, I hear those bring in a lot of cash.'.format(char.charname))
             return
-        elif ir != 'None' and ir not in char.extra.split(', '):         # Checks if the user does not already have the item
-            await bot.say('This item requires you to have {} before you buy it.'.format(ir))
+        elif classs != 'None' and classs != char.classs:                         # Checks if the item is not class specific
+            await bot.say('Sorry {} but you\'ve got to be a {} to buy this item.'.format(char.charname, classs))
             return
-        char.gold -= ig
+        elif req != 'None' and req not in char.extra.split(', '):         # Checks if the user does not already have the item
+            await bot.say('Sorry {} but you\'ve got to have {} before you buy this item. Can\'t have you skipping beginner stuff now can we?.'
+                          .format(char.charname, req))
+            return
+        char.gold -= price
         if char.extra == 'None': char.extra = name
         else: char.extra += ', {}'.format(name)         # Updates users items
-        cursor.execute("UPDATE characters SET gold ={}, extra= '{}' WHERE ID = {}".format(char.gold, char.extra, char.id))
-        db.commit()
-        await bot.say('Congratulations!:tada: You bought {}: ``{}`` for {}G and now you have {}G left'.format(name, desc, ig, char.gold))
+        char.char_update
+        await bot.say('Congratulations!:tada: You bought {}: ``{}`` for {}G and now you have {}G left'.format(name, desc, price, char.gold))
         await record(ctx, '{} has bought the item {}.'.format(char.username, name))
 
 
@@ -713,57 +726,66 @@ with connect('main.db') as db:
     @bot.command(pass_context=True)
     async def plan(ctx):
         item = arg(ctx).capitalize()
-        if check(cursor, 'craft', 'name', item):             # Checks if the item exists
-            await bot.say("The item you want to plan does not exist.")
-        else:
-            name, desc, classs, level, req = cursor.execute('SELECT name, description, class, level, requirements FROM craft WHERE name = "{}"'.
-                                                      format(item)).fetchall()[0]  # Gets item details
+        if not char.char:
+            await bot.say('Hey kid only heros can check this schemes. So get out or start working for me.')
+            return
+        elif check(cursor, 'craft', 'name', item):             # Checks if the item exists
+            await bot.say("I don\'t have a scheme for that, what do you think I am an imagination machine!")
+            return
 
-            embed = Embed(          # Creates item embed
-                title=name,
-                description=desc,
-                colour=Colour.purple()
-            )
-            embed.add_field(name='Class requirement', value=classs)
-            embed.add_field(name='Level', value=level)
-            for i in req.split(', '):
-                embed.add_field(name='Item requirment', value=i)
+        name, desc, classs, level, req = cursor.execute('SELECT name, description, class, level, requirements FROM craft WHERE name = "{}"'.
+                                                  format(item)).fetchall()[0]  # Gets item details
 
-            await bot.say(embed=embed)
+        embed = Embed(          # Creates item embed
+            title=name,
+            description=desc,
+            colour=Colour.purple()
+        )
+        embed.add_field(name='Class requirement', value=classs)
+        embed.add_field(name='Level', value=level)
+        for i in req.split(', '):
+            embed.add_field(name='Item requirment', value=i)
+
+        await bot.say(embed=embed)
 
 
     @bot.command(pass_context=True)
     async def craft(ctx):
         """Attempts to craft an item"""
-        item = arg(ctx)
-        item = item.capitalize()
+        item = arg(ctx).capitalize()
         if not char.char:
-            await bot.say('You need to create a character first to craft items.')
+            await bot.say('Hey kid unless you\'ve got magical hands you won\'t be able to craft this item, come back when you\'ve become a hero.')
             return
         elif check(cursor, 'craft', 'name', item):
-            await bot.say('This item does not exist.')
+            await bot.say('I don\'t have a scheme for this item, how am I supposed to craft it, magic? If you\'re a wizard don\'t answer that.')
+            return
+        name, desc, classs, level, req = cursor.execute('SELECT name, description, class, level, requirements FROM craft WHERE name = ?', (item,)).fetchall()[0]
+        if char.classs != classs:
+            await bot.say('Sorry {} but you have to be a {} to craft this item. In moments like this I wish I could craft classes.'
+                          .format(char.charname, classs))
+            return
+        elif level > char.lvl:
+            await bot.say('''Sorry {} but you have to be a higher level to craft this. Otherwise bad things could happen. 
+            Symptoms include:
+                Diarrhea
+                Headaches
+                Brain explosion
+                Wrist pain''')
             return
         else:
-            name, desc, classs, level, req = cursor.execute('SELECT name, description, class, level, requirements FROM craft WHERE name = ?', (item,)).fetchall()[0]
-            if char.classs != classs:
-                await bot.say('You cannot craft this item as it is locked for the {} class'.format(classs))
-                return
-            elif level > char.lvl:
-                await bot.say('Your level is not high enough to craft this items.')
-                return
-            else:
-                for i in req.split(', '):
-                    if i not in char.extra.split(', '):
-                        await bot.say('You do not have all the items needed to craft this {}'.format(item))
-                        return
+            for i in req.split(', '):
+                if i not in char.extra.split(', '):
+                    await bot.say('Sorry {} but you do not have all the items to craft this. May I advice visiting my brother over at the shop? '
+                                  'He can\'t make items like me but he sure can bargain!'.format(item))
+                    return
 
         ue = char.extra.split(', ')
         for i in req.split(', '):
             ue.remove(i)
         ue.append(item)
         char.extra = ', '.join(ue)
-        cursor.execute('UPDATE characters SET extra =? WHERE ID =?', (char.extra, char.id))
-        await bot.say('You have sucessfuly carfted the item: {}'.format(item))
+        char.char_update
+        await bot.say('Congartulations! You have sucessfuly carfted :hammer: the item: {}'.format(item))
         await record(ctx, '{} has crafted {}'.format(char.username, item))
         db.commit()
 
@@ -771,7 +793,7 @@ with connect('main.db') as db:
     @bot.command(aliases=['book'])
     async def archive():
         l = cursor.execute('SELECT name FROM lore').fetchall()
-        s = 'Archive data:\nName:\n'
+        s = 'Archive data:\n```Name```\n'
         for i in l:
             s += '```{}```'.format(*i)
         await bot.say(s)
@@ -786,7 +808,6 @@ with connect('main.db') as db:
             return
 
         name, desc, lvl, req, ach, rep = cursor.execute('SELECT name, description, level, requirements, achievement, reputation FROM lore WHERE name =?',(s,)).fetchall()[0]
-        ul, ue, ua, ur = cursor.execute('SELECT level, extra, achievements, reputation FROM characters WHERE ID=?', (userid,)).fetchall()[0]
         if not char.char:
             await bot.say('The archive only serves those who have power. Come back as a hero.')
         elif lvl > char.lvl:
@@ -826,8 +847,11 @@ with connect('main.db') as db:
     @bot.command(pass_context=True)
     async def check_out(ctx):
         species = arg(ctx).capitalize()
-        if check(cursor, 'zoo', 'species', species):
-            await bot.say('This pet does not exist')
+        if not char.char:
+            await bot.say('I\'m sorry but we only show fighting creatures to heros, would you be interested in a hamster?')
+            return
+        elif check(cursor, 'zoo', 'species', species):
+            await bot.say('We do not have this pet, do you know where we can rescue it?')
             return
         desc, species, price, heal, damage, armour = cursor.execute('SELECT description, species, price, heal, damage, armour FROM zoo WHERE species =?',
                                                                     (species,)).fetchall()[0]
@@ -845,15 +869,15 @@ with connect('main.db') as db:
     async def adopt(ctx):
         species = arg(ctx).capitalize()
         if not char.char:
-            await bot.say('I\'m sorry but we only adobt fighting creatures to heros, would you be interested in a hamster?')
+            await bot.say('I\'m sorry but only heros have enough income to adobt fighting pets. Wanna look at the domestic animals instead?')
             return
         elif check(cursor, 'zoo', 'species', species):
-            await bot.say('We do not have any pets in that species, did you discover a new type?')
+            await bot.say('We do not have any pets in that species, you know if you discover a new species you can name it!')
             return
         price = cursor.execute('SELECT price FROM zoo WHERE species=?', (species,)).fetchall()[0][0]
         if char.curpet != 'None':
             if species in char.pettypes:
-                await bot.say('You can only have one pet per species.')
+                await bot.say('You can only have one pet per species, don\'t want them fighting now do we.')
                 return
         if price > char.gold:
             await bot.say('You do not have enough income to adobt this pet')
@@ -866,6 +890,7 @@ with connect('main.db') as db:
         db.commit()
         char.char_update()
         await bot.say('Congratulations! You have rescued the a {} pet: {} Thank you for helping this poor animal!'.format(species, desc))
+        await bot.say('To set this pet as your companion use the set_pet {species} command')
         await record(ctx, '{} has adopted a {} pet called {}.'.format(char.username, species, name.content.capitalize()))
 
 
@@ -883,8 +908,10 @@ with connect('main.db') as db:
     @bot.command(pass_context=True)
     async def my_pet(ctx):
         name = arg(ctx).capitalize()
-        if name not in char.pettypes:
-            await bot.say('You do not have this pet.')
+        if not char.char:
+            await bot.say('I\'m sorry but we do not display domestic pets here.')
+        elif name not in char.pettypes:
+            await bot.say('You do not have this pet, want to adobt one?')
             return
 
         embed = Embed(title=char.pets[name]['name'])
@@ -901,10 +928,14 @@ with connect('main.db') as db:
     @bot.command(pass_context=True)
     async def interact(ctx):
         species = arg(ctx).capitalize()
-        if char.curpet == 'None':
-            await bot.say('You do not have a pet to interact with.')
+        if not char.char:
+            await bot.say('You do not have a combat pet to interact with.')
+            return
+        elif char.curpet == 'None':
+            await bot.say('You do not have a currently selected pet to interact with.')
             return
         char.pet['happiness'] += 20
+        char.pet_update()
         gif = choice([
             'mOxCUSoRZ7vDq/giphy.gif', 't3yZAynLPVkGY/200w.gif', 'Ul16jlcdV1B04/200w.gif', 'l0ExvA6hnrdzQ5zoI/200w.gif', 'xTiTnp3zOLUGbBF4ME/200w.gif',
             'OzjugO1GZzaxy/200w.gif'
@@ -918,8 +949,11 @@ with connect('main.db') as db:
     @bot.command(pass_context=True)
     async def set_pet(ctx):
         species = arg(ctx).capitalize()
-        if species not in char.pettypes:
-            await bot.say('You do not own this type of pet to set it as your companion.')
+        if not char.char:
+            await bot.say('You do not have a combat pet to set as your companion.')
+            return
+        elif species not in char.pettypes:
+            await bot.say('You do not own this type of pet to set it as your companion, want to adobt one?')
             return
         cursor.execute('UPDATE characters SET pet=? WHERE ID=?', (species, char.id))
         db.commit()
@@ -928,8 +962,11 @@ with connect('main.db') as db:
     @bot.command(pass_context=True)
     async def lose(ctx):
         species = arg(ctx).capitalize()
+        if not char.char:
+            await bot.say('You cannot give away a domestic pet, it\'s too close to you now, please take good care of it. Please.')
+            return
         if species not in char.pettypes:
-            await bot.say('You do not own a pet of this species.')
+            await bot.say('You want to give away a pet you don\'t even have, how creul can you get?')
             return
         cursor.execute('DELETE FROM pets WHERE ID=? AND species=?', (char.id, species))
         if char.curpet == species:
@@ -943,7 +980,19 @@ with connect('main.db') as db:
         if not 0 < len(ctx.message.mentions) < 2:  # Checks that the battle is only between two users
             await bot.say('Wrong amount of mentions.')
             return
+        elif not char.char:
+            await bot.say('We do not host battles between domestic pets. They\'re not pokemon. Meanie.')
+            return
+        elif char.curpet == 'None':
+            await bot.say('I\'m sorry {} but you need to select a companion to fight with first.'.format(char.charname))
+            return
         char2= Character(ctx.message.mentions[0])
+        if char2.char:
+            await bot.say('The mention does not have a combat pet. It would be a slaughter.')
+            return
+        elif char.curpet == 'None':
+            await bot.say('The mention does not have a selected combat pet.')
+            return
         text = await bot.say('The battle will begin shortly')
         turn = True
         data = []
